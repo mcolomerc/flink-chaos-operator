@@ -92,7 +92,12 @@ func (r *ChaosRunReconciler) Reconcile(ctx context.Context, req ctrl.Request) (c
 		return ctrl.Result{}, err
 	}
 
-	// 2. Skip terminal phases — completed runs are immutable from the
+	// 2. Apply spec defaults so every phase sees consistent values regardless
+	//    of whether the object was just created or re-fetched from the API
+	//    server (defaults are not persisted to the spec, only held in memory).
+	v1alpha1.SetDefaults(run)
+
+	// 3. Skip terminal phases — completed runs are immutable from the
 	//    controller's perspective.
 	if IsTerminal(run.Status.Phase) {
 		return ctrl.Result{}, nil
@@ -163,14 +168,12 @@ func (r *ChaosRunReconciler) Reconcile(ctx context.Context, req ctrl.Request) (c
 }
 
 // reconcilePending handles the initial "" or Pending phase.
-// It applies defaults, validates the spec, records startedAt, then
-// transitions to Injecting and immediately requeues.
+// It validates the spec, records startedAt, then transitions to Injecting
+// and immediately requeues. Defaults are already applied by Reconcile.
 func (r *ChaosRunReconciler) reconcilePending(ctx context.Context, log logr.Logger, run *v1alpha1.ChaosRun) (ctrl.Result, error) {
 	log.Info("reconciling pending run")
 
 	runCopy := run.DeepCopy()
-
-	v1alpha1.SetDefaults(run)
 
 	if err := v1alpha1.Validate(run); err != nil {
 		FailRun(run, "spec validation failed: "+err.Error())
@@ -398,6 +401,13 @@ func (r *ChaosRunReconciler) reconcileInjecting(ctx context.Context, log logr.Lo
 
 	log.Info("injection complete", "selected", result.SelectedPods,
 		"injected", result.InjectedPods)
+
+	// Persist InjectedPods/SelectedPods before transitioning to Observing.
+	// transitionToObserving takes its own runCopy baseline, so any fields set
+	// on run after the original runCopy would not appear in that patch.
+	if patchErr := r.Status().Patch(ctx, run, client.MergeFrom(runCopy)); patchErr != nil {
+		return ctrl.Result{}, patchErr
+	}
 
 	return r.transitionToObserving(ctx, run)
 }

@@ -329,8 +329,9 @@ func setSafetyDefaults(s *SafetySpec) {
 		s.MaxConcurrentRunsPerTarget = 1
 	}
 
-	if s.MinTaskManagersRemaining == 0 {
-		s.MinTaskManagersRemaining = 1
+	if s.MinTaskManagersRemaining == nil {
+		v := int32(1)
+		s.MinTaskManagersRemaining = &v
 	}
 
 	if s.MaxNetworkChaosDuration == nil {

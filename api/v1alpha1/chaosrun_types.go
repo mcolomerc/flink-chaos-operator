@@ -398,10 +398,11 @@ type SafetySpec struct {
 
 	// MinTaskManagersRemaining is the minimum number of TaskManager pods that
 	// must remain running after injection. The run is blocked if this threshold
-	// would be violated.
+	// would be violated. Defaults to 1. Set explicitly to 0 to allow killing
+	// all TaskManagers (useful in single-TM test environments).
 	// +kubebuilder:validation:Minimum=0
 	// +optional
-	MinTaskManagersRemaining int `json:"minTaskManagersRemaining,omitempty"`
+	MinTaskManagersRemaining *int32 `json:"minTaskManagersRemaining,omitempty"`
 
 	// AllowSharedClusterImpact permits the run even when the target shares a
 	// Kubernetes cluster with other workloads that may be affected.

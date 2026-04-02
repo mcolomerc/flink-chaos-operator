@@ -151,9 +151,12 @@ func (c *Checker) checkMinTaskManagersRemaining(run *v1alpha1.ChaosRun, target *
 	}
 
 	remaining := len(target.TMPodNames) - count
-	minRequired := run.Spec.Safety.MinTaskManagersRemaining
+	minRequired := int32(1) // default; overridden below if explicitly set
+	if run.Spec.Safety.MinTaskManagersRemaining != nil {
+		minRequired = *run.Spec.Safety.MinTaskManagersRemaining
+	}
 
-	if remaining < minRequired {
+	if int32(remaining) < minRequired {
 		return fmt.Errorf(
 			"injecting %d pod(s) from %d available TaskManagers would leave %d remaining, "+
 				"below the required minimum of %d (spec.safety.minTaskManagersRemaining)",

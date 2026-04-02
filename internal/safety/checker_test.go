@@ -64,7 +64,7 @@ func newRun(namespace, name string) *v1alpha1.ChaosRun {
 			},
 			Safety: v1alpha1.SafetySpec{
 				MaxConcurrentRunsPerTarget: 1,
-				MinTaskManagersRemaining:   1,
+				MinTaskManagersRemaining:   func() *int32 { v := int32(1); return &v }(),
 			},
 		},
 	}
@@ -171,7 +171,7 @@ func TestCheck_MinTMRemaining_RejectedWhenBelowThreshold(t *testing.T) {
 	// 2 TM pods, count=1, minRemaining=2 => 2-1=1 < 2 => rejected.
 	run := newRun("default", "chaos-run")
 	run.Spec.Scenario.Selection.Count = 1
-	run.Spec.Safety.MinTaskManagersRemaining = 2
+	{ v := int32(2); run.Spec.Safety.MinTaskManagersRemaining = &v }
 
 	target := newTarget("my-flink-job", []string{"tm-0", "tm-1"})
 
@@ -186,7 +186,7 @@ func TestCheck_MinTMRemaining_PassesWhenEnoughPodsRemain(t *testing.T) {
 	// 3 TM pods, count=1, minRemaining=2 => 3-1=2 >= 2 => allowed.
 	run := newRun("default", "chaos-run")
 	run.Spec.Scenario.Selection.Count = 1
-	run.Spec.Safety.MinTaskManagersRemaining = 2
+	{ v := int32(2); run.Spec.Safety.MinTaskManagersRemaining = &v }
 
 	target := newTarget("my-flink-job", []string{"tm-0", "tm-1", "tm-2"})
 
@@ -201,7 +201,7 @@ func TestCheck_MinTMRemaining_DefaultsCountToOneWhenZero(t *testing.T) {
 	// 1 TM pod, effective count=1, minRemaining=1 => 1-1=0 < 1 => rejected.
 	run := newRun("default", "chaos-run")
 	run.Spec.Scenario.Selection.Count = 0
-	run.Spec.Safety.MinTaskManagersRemaining = 1
+	{ v := int32(1); run.Spec.Safety.MinTaskManagersRemaining = &v }
 
 	target := newTarget("my-flink-job", []string{"tm-0"})
 

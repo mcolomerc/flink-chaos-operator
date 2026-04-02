@@ -354,6 +354,10 @@ func (in *ResourceExhaustionSpec) DeepCopy() *ResourceExhaustionSpec {
 // DeepCopyInto copies all fields of SafetySpec into out. in must not be nil.
 func (in *SafetySpec) DeepCopyInto(out *SafetySpec) {
 	*out = *in
+	if in.MinTaskManagersRemaining != nil {
+		v := *in.MinTaskManagersRemaining
+		out.MinTaskManagersRemaining = &v
+	}
 	if in.MaxNetworkChaosDuration != nil {
 		d := *in.MaxNetworkChaosDuration
 		out.MaxNetworkChaosDuration = &d

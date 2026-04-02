@@ -1,0 +1,14 @@
+apiVersion: v2
+name: flink-chaos-operator
+description: A Kubernetes-native chaos operator for Apache Flink workloads
+type: application
+version: 0.1.0
+appVersion: "0.1.0"
+keywords:
+  - flink
+  - chaos
+  - operator
+  - testing
+maintainers:
+  - name: flink-chaos-operator
+home: https://github.com/flink-chaos-operator/flink-chaos-operator

@@ -1,0 +1,31 @@
+# Binaries for programs and plugins
+*.exe
+*.exe~
+*.dll
+*.so
+*.dylib
+
+# Compiled operator and CLI binaries
+bin/
+kubectl-fchaos
+chaos-operator
+
+# Test binary, built with `go test -c`
+*.test
+
+# Rich error detection files
+*.out
+
+# Coverage output, generated with `go test -coverprofile`
+*.coverprofile
+
+# Claude Code local files
+.claude/
+
+# Editor-specific files
+.idea/
+.vscode/
+.DS_Store
+
+# macOS metadata
+**/.DS_Store

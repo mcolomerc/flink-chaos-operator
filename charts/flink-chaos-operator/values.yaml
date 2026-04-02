@@ -1,0 +1,83 @@
+replicaCount: 1
+
+image:
+  repository: ghcr.io/flink-chaos-operator/flink-chaos-operator
+  pullPolicy: IfNotPresent
+  tag: ""  # defaults to Chart.appVersion
+
+imagePullSecrets: []
+nameOverride: ""
+fullnameOverride: ""
+
+serviceAccount:
+  create: true
+  annotations: {}
+  name: ""
+
+podAnnotations: {}
+
+podSecurityContext:
+  runAsNonRoot: true
+  runAsUser: 65532
+
+securityContext:
+  allowPrivilegeEscalation: false
+  capabilities:
+    drop:
+      - ALL
+  readOnlyRootFilesystem: true
+
+resources:
+  limits:
+    cpu: 500m
+    memory: 128Mi
+  requests:
+    cpu: 10m
+    memory: 64Mi
+
+# namespace restricts the operator to a single namespace.
+# When empty, the operator watches all namespaces (requires ClusterRole, not supported in MVP).
+# Set this to the namespace where Flink workloads run.
+watchNamespace: ""
+
+metrics:
+  enabled: true
+  port: 8080
+  serviceMonitor:
+    enabled: false
+    interval: 30s
+    scrapeTimeout: 10s
+
+defaults:
+  observe:
+    timeout: 10m
+    pollInterval: 5s
+  safety:
+    maxConcurrentRunsPerTarget: 1
+    minTaskManagersRemaining: 1
+    allowSharedClusterImpact: false
+    maxNetworkChaosDuration: 5m
+    allowCheckpointStorageChaos: false
+
+features:
+  ververicaResolver: true
+  podSelectorTarget: true
+  networkChaos: true
+  networkPartition: true
+
+networkchaos:
+  # tcImage is the container image used for ephemeral tc(8) injection containers.
+  # Override this to use a custom image with iproute2/tc installed.
+  tcImage: ghcr.io/flink-chaos-operator/tc-tools:latest
+
+resourceExhaustion:
+  # stressImage is the container image used for ephemeral stress-ng injection containers.
+  # Override this to use a custom image with stress-ng installed.
+  stressImage: ghcr.io/flink-chaos-operator/stress-tools:latest
+
+logging:
+  level: info
+
+leaderElect: false
+
+installCRD: true

@@ -1,0 +1,46 @@
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: {{ include "flink-chaos-operator.fullname" . }}
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "flink-chaos-operator.labels" . | nindent 4 }}
+rules:
+  # ChaosRun resources
+  - apiGroups: ["chaos.flink.io"]
+    resources: ["chaosruns"]
+    verbs: ["get", "list", "watch", "create", "update", "patch", "delete"]
+  - apiGroups: ["chaos.flink.io"]
+    resources: ["chaosruns/status"]
+    verbs: ["get", "update", "patch"]
+  - apiGroups: ["chaos.flink.io"]
+    resources: ["chaosruns/finalizers"]
+    verbs: ["update"]
+  # Pods — read and delete TaskManager pods
+  - apiGroups: [""]
+    resources: ["pods"]
+    verbs: ["get", "list", "watch", "delete"]
+  # Events — for audit trail
+  - apiGroups: [""]
+    resources: ["events"]
+    verbs: ["create", "patch"]
+  # FlinkDeployments — read-only for target resolution
+  - apiGroups: ["flink.apache.org"]
+    resources: ["flinkdeployments"]
+    verbs: ["get", "list", "watch"]
+  # NetworkPolicies — created and deleted by the NetworkPartition scenario
+  - apiGroups: ["networking.k8s.io"]
+    resources: ["networkpolicies"]
+    verbs: ["get", "list", "watch", "create", "delete", "patch"]
+  # Ephemeral containers — used by the NetworkChaos scenario for tc injection
+  - apiGroups: [""]
+    resources: ["pods/ephemeralcontainers"]
+    verbs: ["get", "patch", "update"]
+  # Pod exec — required by the kubernetes typed client to reach ephemeralcontainers subresource
+  - apiGroups: [""]
+    resources: ["pods/exec"]
+    verbs: ["create"]
+  # Leader election
+  - apiGroups: ["coordination.k8s.io"]
+    resources: ["leases"]
+    verbs: ["get", "list", "watch", "create", "update", "patch", "delete"]

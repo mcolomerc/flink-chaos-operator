@@ -1,0 +1,266 @@
+---
+apiVersion: apiextensions.k8s.io/v1
+kind: CustomResourceDefinition
+metadata:
+  name: chaosruns.chaos.flink.io
+spec:
+  group: chaos.flink.io
+  names:
+    kind: ChaosRun
+    listKind: ChaosRunList
+    plural: chaosruns
+    shortNames:
+    - cr
+    - chaosrun
+    singular: chaosrun
+  scope: Namespaced
+  versions:
+  - additionalPrinterColumns:
+    - jsonPath: .status.phase
+      name: Phase
+      type: string
+    - jsonPath: .status.verdict
+      name: Verdict
+      type: string
+    - jsonPath: .status.targetSummary.name
+      name: Target
+      type: string
+    - jsonPath: .metadata.creationTimestamp
+      name: Age
+      type: date
+    name: v1alpha1
+    schema:
+      openAPIV3Schema:
+        description: ChaosRun is the Schema for the chaosruns API.
+        properties:
+          apiVersion:
+            type: string
+          kind:
+            type: string
+          metadata:
+            type: object
+          spec:
+            description: ChaosRunSpec defines the desired chaos experiment.
+            properties:
+              control:
+                description: Control provides runtime signals for an in-flight run.
+                properties:
+                  abort:
+                    description: Abort requests an immediate stop of the ChaosRun.
+                    type: boolean
+                type: object
+              observe:
+                description: Observe configures the post-injection observation phase.
+                properties:
+                  enabled:
+                    type: boolean
+                  flinkRest:
+                    properties:
+                      enabled:
+                        type: boolean
+                      endpoint:
+                        type: string
+                    type: object
+                  pollInterval:
+                    type: string
+                  timeout:
+                    type: string
+                type: object
+              safety:
+                description: Safety defines guardrails that prevent unsafe executions.
+                properties:
+                  allowSharedClusterImpact:
+                    type: boolean
+                  dryRun:
+                    type: boolean
+                  maxConcurrentRunsPerTarget:
+                    minimum: 1
+                    type: integer
+                  minTaskManagersRemaining:
+                    minimum: 0
+                    type: integer
+                type: object
+              scenario:
+                description: Scenario describes the chaos scenario to execute.
+                properties:
+                  action:
+                    properties:
+                      gracePeriodSeconds:
+                        format: int64
+                        minimum: 0
+                        type: integer
+                      type:
+                        enum:
+                        - DeletePod
+                        type: string
+                    required:
+                    - type
+                    type: object
+                  selection:
+                    properties:
+                      count:
+                        minimum: 1
+                        type: integer
+                      mode:
+                        enum:
+                        - Random
+                        - Explicit
+                        type: string
+                      podNames:
+                        items:
+                          type: string
+                        type: array
+                    type: object
+                  type:
+                    enum:
+                    - TaskManagerPodKill
+                    type: string
+                required:
+                - type
+                type: object
+              target:
+                description: Target identifies the Flink workload to disrupt.
+                properties:
+                  deploymentId:
+                    type: string
+                  deploymentName:
+                    type: string
+                  name:
+                    type: string
+                  selector:
+                    description: A label selector is a label query over a set of
+                      resources.
+                    properties:
+                      matchExpressions:
+                        items:
+                          properties:
+                            key:
+                              type: string
+                            operator:
+                              type: string
+                            values:
+                              items:
+                                type: string
+                              type: array
+                          required:
+                          - key
+                          - operator
+                          type: object
+                        type: array
+                      matchLabels:
+                        additionalProperties:
+                          type: string
+                        type: object
+                    type: object
+                  type:
+                    enum:
+                    - FlinkDeployment
+                    - VervericaDeployment
+                    - PodSelector
+                    type: string
+                  vvpNamespace:
+                    type: string
+                required:
+                - type
+                type: object
+            required:
+            - scenario
+            - target
+            type: object
+          status:
+            description: ChaosRunStatus describes the observed state of a ChaosRun.
+            properties:
+              conditions:
+                items:
+                  description: Condition contains details for one aspect of the current
+                    state of this API Resource.
+                  properties:
+                    lastTransitionTime:
+                      format: date-time
+                      type: string
+                    message:
+                      type: string
+                    observedGeneration:
+                      format: int64
+                      type: integer
+                    reason:
+                      type: string
+                    status:
+                      type: string
+                    type:
+                      type: string
+                  required:
+                  - lastTransitionTime
+                  - message
+                  - reason
+                  - status
+                  - type
+                  type: object
+                type: array
+                x-kubernetes-list-map-keys:
+                - type
+                x-kubernetes-list-type: map
+              endedAt:
+                format: date-time
+                type: string
+              injectedPods:
+                items:
+                  type: string
+                type: array
+              message:
+                type: string
+              observation:
+                properties:
+                  jobStateAfter:
+                    type: string
+                  jobStateBefore:
+                    type: string
+                  recoveryObservedAt:
+                    format: date-time
+                    type: string
+                  taskManagerCountAfter:
+                    type: integer
+                  taskManagerCountBefore:
+                    type: integer
+                type: object
+              phase:
+                enum:
+                - Pending
+                - Validating
+                - Injecting
+                - Observing
+                - Completed
+                - Aborted
+                - Failed
+                type: string
+              replacementObserved:
+                type: boolean
+              selectedPods:
+                items:
+                  type: string
+                type: array
+              startedAt:
+                format: date-time
+                type: string
+              targetSummary:
+                properties:
+                  name:
+                    type: string
+                  type:
+                    type: string
+                required:
+                - name
+                - type
+                type: object
+              verdict:
+                enum:
+                - Passed
+                - Failed
+                - Inconclusive
+                type: string
+            type: object
+        type: object
+    served: true
+    storage: true
+    subresources:
+      status: {}

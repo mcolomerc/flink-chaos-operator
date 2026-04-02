@@ -1,0 +1,31 @@
+# Example: Dry run — validate target resolution and safety checks without
+# killing any pods.
+#
+# A dry run completes with Verdict: Inconclusive and records a DryRunPreview
+# in .status.dryRunPreview showing which pods would have been selected.
+# Use this to verify your label selectors before running a real experiment.
+#
+apiVersion: chaos.flink.io/v1alpha1
+kind: ChaosRun
+metadata:
+  name: tm-kill-dryrun
+  namespace: vvp-jobs
+spec:
+  target:
+    type: PodSelector
+    selector:
+      matchLabels:
+        component: taskmanager
+        system: ververica-platform
+
+  scenario:
+    type: TaskManagerPodKill
+    selection:
+      mode: Random
+      count: 1
+    action:
+      type: DeletePod
+
+  safety:
+    dryRun: true                 # no pods are deleted; all checks still run
+    minTaskManagersRemaining: 1

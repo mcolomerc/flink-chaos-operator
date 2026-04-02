@@ -1,0 +1,39 @@
+# Example: Kill one random TaskManager pod on a FlinkDeployment.
+#
+# Use this when your Flink job is managed by the Apache Flink Kubernetes
+# Operator (FlinkDeployment CRD). The operator resolves TaskManager pods
+# automatically from the named FlinkDeployment.
+#
+# Prerequisites:
+#   - Flink Kubernetes Operator installed
+#   - A FlinkDeployment named "my-flink-app" exists in the same namespace
+#
+apiVersion: chaos.flink.io/v1alpha1
+kind: ChaosRun
+metadata:
+  name: tm-kill-flinkdeployment
+  namespace: streaming           # namespace where your FlinkDeployment lives
+spec:
+  target:
+    type: FlinkDeployment
+    name: my-flink-app           # must match .metadata.name of the FlinkDeployment
+
+  scenario:
+    type: TaskManagerPodKill
+    selection:
+      mode: Random
+      count: 1
+    action:
+      type: DeletePod
+
+  safety:
+    minTaskManagersRemaining: 1
+
+  observe:
+    enabled: true
+    timeout: 5m
+    pollInterval: 10s
+    flinkRest:
+      enabled: true              # also verify via Flink REST API that job is RUNNING
+      # endpoint: http://my-flink-app-rest.streaming.svc.cluster.local:8081
+      # Leave endpoint empty to auto-discover from the FlinkDeployment's service

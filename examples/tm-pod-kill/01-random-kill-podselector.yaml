@@ -1,0 +1,37 @@
+# Example: Kill one random TaskManager pod, selected by label.
+#
+# Use this when your Flink job is managed directly as Kubernetes
+# Deployments/Jobs (e.g. Ververica Platform, raw Flink on Kubernetes)
+# and you want to target pods by label rather than a named resource.
+#
+# Adjust the matchLabels to match the labels on your TaskManager pods.
+#
+apiVersion: chaos.flink.io/v1alpha1
+kind: ChaosRun
+metadata:
+  name: tm-kill-random
+  namespace: vvp-jobs          # namespace where your Flink pods run
+spec:
+  target:
+    type: PodSelector
+    selector:
+      matchLabels:
+        component: taskmanager
+        system: ververica-platform   # remove if not using Ververica Platform
+
+  scenario:
+    type: TaskManagerPodKill
+    selection:
+      mode: Random
+      count: 1                 # number of TaskManagers to kill simultaneously
+    action:
+      type: DeletePod          # graceful delete (SIGTERM → grace period → SIGKILL)
+
+  safety:
+    minTaskManagersRemaining: 1  # refuse to kill if fewer than 1 TM would survive
+    # Set to 0 in single-TM environments (e.g. local dev clusters)
+
+  observe:
+    enabled: true
+    timeout: 5m        # how long to wait for replacement pods to become Ready
+    pollInterval: 10s  # how often to check for recovery

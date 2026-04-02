@@ -1,0 +1,45 @@
+# Example: Inject 200ms latency + 50ms jitter on TM → JM traffic.
+#
+# Uses an ephemeral container running tc(8) netem to add artificial delay
+# to packets leaving the TaskManager's network interface toward the JobManager.
+#
+# The injection runs for 'duration', then cleans up automatically.
+# The ephemeral container exits once the tc rules are removed.
+#
+# Requirements:
+#   - Cluster must support ephemeral containers (Kubernetes 1.23+)
+#   - networkchaos.tcImage must be an image with iproute2/tc installed
+#     Default: ghcr.io/flink-chaos-operator/tc-tools:latest
+#     Override in Helm: --set networkchaos.tcImage=<your-image>
+#
+apiVersion: chaos.flink.io/v1alpha1
+kind: ChaosRun
+metadata:
+  name: netchaos-latency
+  namespace: vvp-jobs
+spec:
+  target:
+    type: PodSelector
+    selector:
+      matchLabels:
+        component: taskmanager
+        system: ververica-platform
+
+  scenario:
+    type: NetworkChaos
+    network:
+      target: TMtoJM          # apply tc rules on TM pods toward JobManager
+      direction: Both
+      latency: 200ms          # fixed one-way delay
+      jitter: 50ms            # ±50ms random variation (tc netem delay X jitter Y)
+      duration: 30s
+
+  safety:
+    minTaskManagersRemaining: 0
+    allowSharedClusterImpact: true
+    maxNetworkChaosDuration: 5m
+
+  observe:
+    enabled: true
+    timeout: 3m
+    pollInterval: 10s

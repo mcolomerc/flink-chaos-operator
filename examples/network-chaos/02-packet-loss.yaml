@@ -1,0 +1,34 @@
+# Example: Inject 20% packet loss on TM → JM traffic.
+#
+# Uses tc netem to randomly drop 1 in 5 packets.
+# Useful for testing Flink's resilience to unreliable networks.
+#
+apiVersion: chaos.flink.io/v1alpha1
+kind: ChaosRun
+metadata:
+  name: netchaos-loss
+  namespace: vvp-jobs
+spec:
+  target:
+    type: PodSelector
+    selector:
+      matchLabels:
+        component: taskmanager
+        system: ververica-platform
+
+  scenario:
+    type: NetworkChaos
+    network:
+      target: TMtoJM
+      direction: Both
+      loss: 20              # 20% packet drop rate (integer, 0-100)
+      duration: 60s
+
+  safety:
+    minTaskManagersRemaining: 1
+    allowSharedClusterImpact: true
+
+  observe:
+    enabled: true
+    timeout: 5m
+    pollInterval: 15s

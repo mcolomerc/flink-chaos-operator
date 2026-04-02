@@ -58,10 +58,17 @@ spec:
                     type: boolean
                   flinkRest:
                     properties:
+                      checkpointStableWindowSeconds:
+                        minimum: 1
+                        type: integer
+                      checkpointWaitTimeout:
+                        type: string
                       enabled:
                         type: boolean
                       endpoint:
                         type: string
+                      requireStableCheckpointBeforeInject:
+                        type: boolean
                     type: object
                   pollInterval:
                     type: string
@@ -71,6 +78,8 @@ spec:
               safety:
                 description: Safety defines guardrails that prevent unsafe executions.
                 properties:
+                  allowCheckpointStorageChaos:
+                    type: boolean
                   allowSharedClusterImpact:
                     type: boolean
                   dryRun:
@@ -78,6 +87,10 @@ spec:
                   maxConcurrentRunsPerTarget:
                     minimum: 1
                     type: integer
+                  maxNetworkChaosDuration:
+                    type: string
+                  maxResourceExhaustionDuration:
+                    type: string
                   minTaskManagersRemaining:
                     minimum: 0
                     type: integer
@@ -86,6 +99,7 @@ spec:
                 description: Scenario describes the chaos scenario to execute.
                 properties:
                   action:
+                    description: Action defines the disruptive action for TaskManagerPodKill.
                     properties:
                       gracePeriodSeconds:
                         format: int64
@@ -98,7 +112,85 @@ spec:
                     required:
                     - type
                     type: object
+                  network:
+                    description: Network describes disruption parameters for NetworkPartition and NetworkChaos.
+                    properties:
+                      bandwidth:
+                        description: Maximum egress rate (e.g. "10mbit"). NetworkChaos TMtoExternal only.
+                        type: string
+                      direction:
+                        description: Traffic directions affected.
+                        enum:
+                        - Ingress
+                        - Egress
+                        - Both
+                        type: string
+                      duration:
+                        description: How long the disruption remains active. Defaults to 60s.
+                        type: string
+                      externalEndpoint:
+                        description: Remote endpoint for TMtoCheckpoint or TMtoExternal targets.
+                        properties:
+                          cidr:
+                            description: IP block of the external endpoint (e.g. "10.200.0.0/16").
+                            type: string
+                          hostname:
+                            description: DNS name for the external endpoint (NetworkChaos only).
+                            type: string
+                          port:
+                            description: Restrict chaos to a single destination port.
+                            maximum: 65535
+                            minimum: 1
+                            type: integer
+                        type: object
+                      jitter:
+                        description: Random variation added to delay (e.g. "20ms"). Requires latency.
+                        type: string
+                      latency:
+                        description: Fixed one-way delay to inject (e.g. "100ms"). NetworkChaos only.
+                        type: string
+                      loss:
+                        description: Percentage of packets to drop (0-100). NetworkChaos only.
+                        maximum: 100
+                        minimum: 0
+                        type: integer
+                      target:
+                        description: Flink component pair to disrupt.
+                        enum:
+                        - TMtoTM
+                        - TMtoJM
+                        - TMtoCheckpoint
+                        - TMtoExternal
+                        type: string
+                    required:
+                    - target
+                    type: object
+                  resourceExhaustion:
+                    description: ResourceExhaustion configures CPU or memory stress injection.
+                    properties:
+                      duration:
+                        description: How long the stress injection runs. Defaults to 60s.
+                        type: string
+                      memoryPercent:
+                        description: Percentage of pod memory limit to consume (1-100). Memory mode only.
+                        maximum: 100
+                        minimum: 1
+                        type: integer
+                      mode:
+                        description: Whether CPU or Memory is exhausted.
+                        enum:
+                        - CPU
+                        - Memory
+                        type: string
+                      workers:
+                        description: Number of stress-ng worker goroutines. Defaults to 1.
+                        minimum: 1
+                        type: integer
+                    required:
+                    - mode
+                    type: object
                   selection:
+                    description: Selection controls which pods are disrupted. Used by TaskManagerPodKill.
                     properties:
                       count:
                         minimum: 1
@@ -116,6 +208,9 @@ spec:
                   type:
                     enum:
                     - TaskManagerPodKill
+                    - NetworkPartition
+                    - NetworkChaos
+                    - ResourceExhaustion
                     type: string
                 required:
                 - type
@@ -130,8 +225,7 @@ spec:
                   name:
                     type: string
                   selector:
-                    description: A label selector is a label query over a set of
-                      resources.
+                    description: A label selector is a label query over a set of resources.
                     properties:
                       matchExpressions:
                         items:
@@ -205,6 +299,22 @@ spec:
               endedAt:
                 format: date-time
                 type: string
+              ephemeralContainerInjections:
+                description: Records of ephemeral containers injected for NetworkChaos.
+                items:
+                  properties:
+                    containerName:
+                      type: string
+                    injectedAt:
+                      format: date-time
+                      type: string
+                    podName:
+                      type: string
+                  required:
+                  - containerName
+                  - podName
+                  type: object
+                type: array
               injectedPods:
                 items:
                   type: string
@@ -225,18 +335,38 @@ spec:
                   taskManagerCountBefore:
                     type: integer
                 type: object
+              observingStartedAt:
+                format: date-time
+                type: string
               phase:
                 enum:
                 - Pending
                 - Validating
                 - Injecting
                 - Observing
+                - CleaningUp
                 - Completed
                 - Aborted
                 - Failed
                 type: string
               replacementObserved:
                 type: boolean
+              resourceExhaustionInjections:
+                description: Records of ephemeral containers injected for ResourceExhaustion.
+                items:
+                  properties:
+                    containerName:
+                      type: string
+                    injectedAt:
+                      format: date-time
+                      type: string
+                    podName:
+                      type: string
+                  required:
+                  - containerName
+                  - podName
+                  type: object
+                type: array
               selectedPods:
                 items:
                   type: string

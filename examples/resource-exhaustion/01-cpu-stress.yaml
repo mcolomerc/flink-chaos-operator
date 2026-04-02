@@ -1,0 +1,41 @@
+# Example: Saturate 1 CPU core on every selected TaskManager for 30 seconds.
+#
+# Uses an ephemeral container running stress-ng --cpu to create artificial
+# CPU load on the TM pod. Useful for testing Flink's behaviour when
+# TaskManagers are CPU-starved (delayed heartbeats, slow processing, etc.).
+#
+# Requirements:
+#   - Kubernetes 1.23+ with ephemeral containers enabled
+#   - resourceExhaustion.stressImage must be an image with stress-ng installed
+#     Default: ghcr.io/flink-chaos-operator/stress-tools:latest
+#     Override in Helm: --set resourceExhaustion.stressImage=<your-image>
+#
+apiVersion: chaos.flink.io/v1alpha1
+kind: ChaosRun
+metadata:
+  name: resexhaust-cpu
+  namespace: vvp-jobs
+spec:
+  target:
+    type: PodSelector
+    selector:
+      matchLabels:
+        component: taskmanager
+        system: ververica-platform
+
+  scenario:
+    type: ResourceExhaustion
+    resourceExhaustion:
+      mode: CPU
+      workers: 1       # number of stress-ng --cpu workers (1 per core to saturate)
+      duration: 30s
+
+  safety:
+    minTaskManagersRemaining: 0
+    allowSharedClusterImpact: true
+    maxResourceExhaustionDuration: 5m
+
+  observe:
+    enabled: true
+    timeout: 3m
+    pollInterval: 10s

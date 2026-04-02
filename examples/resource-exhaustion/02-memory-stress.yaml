@@ -1,0 +1,39 @@
+# Example: Exhaust 80% of each TaskManager's memory limit for 30 seconds.
+#
+# Uses stress-ng --vm to allocate and touch memory pages up to the
+# configured percentage of the pod's memory limit. Tests Flink behaviour
+# under memory pressure: GC pauses, OOM risk, checkpoint latency.
+#
+# Important: Set memoryPercent below 100 to avoid OOMKill on the TM pod.
+# For initial testing use 50-70% to understand the effect before going higher.
+#
+apiVersion: chaos.flink.io/v1alpha1
+kind: ChaosRun
+metadata:
+  name: resexhaust-memory
+  namespace: vvp-jobs
+spec:
+  target:
+    type: PodSelector
+    selector:
+      matchLabels:
+        component: taskmanager
+        system: ververica-platform
+
+  scenario:
+    type: ResourceExhaustion
+    resourceExhaustion:
+      mode: Memory
+      workers: 1         # number of stress-ng --vm workers
+      memoryPercent: 80  # percentage of the pod's memory limit to consume (1-100)
+      duration: 30s
+
+  safety:
+    minTaskManagersRemaining: 0
+    allowSharedClusterImpact: true
+    maxResourceExhaustionDuration: 5m
+
+  observe:
+    enabled: true
+    timeout: 3m
+    pollInterval: 10s

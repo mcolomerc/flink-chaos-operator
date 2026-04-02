@@ -1,0 +1,35 @@
+# Example: Isolate TaskManagers from each other.
+#
+# Creates NetworkPolicies on each TaskManager pod blocking intra-TM traffic.
+# Useful for simulating split-brain or partial network failures.
+#
+# Requires at least 2 TaskManagers to observe intra-TM communication effects.
+#
+apiVersion: chaos.flink.io/v1alpha1
+kind: ChaosRun
+metadata:
+  name: netpart-tm-tm
+  namespace: vvp-jobs
+spec:
+  target:
+    type: PodSelector
+    selector:
+      matchLabels:
+        component: taskmanager
+        system: ververica-platform
+
+  scenario:
+    type: NetworkPartition
+    network:
+      target: TMtoTM
+      direction: Both
+      duration: 60s
+
+  safety:
+    minTaskManagersRemaining: 2   # need at least 2 TMs for this to be meaningful
+    allowSharedClusterImpact: true
+
+  observe:
+    enabled: true
+    timeout: 5m
+    pollInterval: 15s

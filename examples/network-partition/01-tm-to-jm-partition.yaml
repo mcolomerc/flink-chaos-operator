@@ -1,0 +1,46 @@
+# Example: Partition TM ↔ JM traffic using a Kubernetes NetworkPolicy.
+#
+# Creates deny-all NetworkPolicies on the JobManager pods to block
+# all ingress/egress from/to TaskManagers. After 'duration' the policies
+# are automatically removed. No ephemeral containers required.
+#
+# What to expect:
+#   - Flink heartbeats between TM and JM are blocked
+#   - The job will enter a FAILING/RESTARTING state
+#   - After cleanup, the TM reconnects and the job resumes
+#   - Verdict will be Passed if Flink REST confirms RUNNING again,
+#     or Inconclusive/Failed if no Flink REST endpoint is configured
+#
+apiVersion: chaos.flink.io/v1alpha1
+kind: ChaosRun
+metadata:
+  name: netpart-tm-jm
+  namespace: vvp-jobs        # namespace where your Flink pods run
+spec:
+  target:
+    type: PodSelector
+    selector:
+      matchLabels:
+        component: taskmanager
+        system: ververica-platform   # adjust labels to match your TM pods
+
+  scenario:
+    type: NetworkPartition
+    network:
+      target: TMtoJM          # block traffic between TaskManagers and JobManager
+      direction: Both         # block both ingress and egress (full partition)
+      duration: 30s           # how long to hold the partition before cleanup
+
+  safety:
+    minTaskManagersRemaining: 1
+    allowSharedClusterImpact: true   # required: NetworkPolicy affects whole pod
+    # Set minTaskManagersRemaining: 0 for single-TM environments
+
+  observe:
+    enabled: true
+    timeout: 3m
+    pollInterval: 10s
+    # Add flinkRest to get a meaningful Passed/Failed verdict:
+    # flinkRest:
+    #   enabled: true
+    #   endpoint: http://<jobmanager-service>:8081

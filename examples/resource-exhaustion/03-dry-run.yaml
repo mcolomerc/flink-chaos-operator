@@ -1,0 +1,26 @@
+# Example: Dry run for ResourceExhaustion — validate target without stressing.
+#
+apiVersion: chaos.flink.io/v1alpha1
+kind: ChaosRun
+metadata:
+  name: resexhaust-dryrun
+  namespace: vvp-jobs
+spec:
+  target:
+    type: PodSelector
+    selector:
+      matchLabels:
+        component: taskmanager
+        system: ververica-platform
+
+  scenario:
+    type: ResourceExhaustion
+    resourceExhaustion:
+      mode: CPU
+      workers: 1
+      duration: 30s
+
+  safety:
+    dryRun: true
+    minTaskManagersRemaining: 0
+    allowSharedClusterImpact: true

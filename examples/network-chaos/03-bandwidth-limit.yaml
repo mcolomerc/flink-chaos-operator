@@ -1,0 +1,39 @@
+# Example: Throttle TM egress bandwidth to an external sink to 1 Mbit/s.
+#
+# Uses tc tbf (token bucket filter) to cap the egress rate on TM pods
+# toward an external endpoint (e.g. Kafka, S3, JDBC sink).
+#
+# Only supported with target: TMtoExternal.
+#
+apiVersion: chaos.flink.io/v1alpha1
+kind: ChaosRun
+metadata:
+  name: netchaos-bandwidth
+  namespace: vvp-jobs
+spec:
+  target:
+    type: PodSelector
+    selector:
+      matchLabels:
+        component: taskmanager
+        system: ververica-platform
+
+  scenario:
+    type: NetworkChaos
+    network:
+      target: TMtoExternal
+      direction: Egress
+      bandwidth: 1mbit         # cap egress to 1 Mbit/s (tc tbf)
+      duration: 60s
+      externalEndpoint:
+        hostname: kafka.kafka.svc.cluster.local   # DNS name of the external endpoint
+        # cidr: "10.200.0.0/16"                  # or use CIDR if DNS is not available
+
+  safety:
+    minTaskManagersRemaining: 1
+    allowSharedClusterImpact: true
+
+  observe:
+    enabled: true
+    timeout: 5m
+    pollInterval: 15s

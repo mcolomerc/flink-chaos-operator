@@ -7,8 +7,9 @@
 
 # Compiled operator and CLI binaries
 bin/
-kubectl-fchaos
-chaos-operator
+/kubectl-fchaos
+/kubectl-fchaos-*
+/chaos-operator
 
 # Test binary, built with `go test -c`
 *.test

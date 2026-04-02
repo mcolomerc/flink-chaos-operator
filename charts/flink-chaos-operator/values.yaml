@@ -1,7 +1,7 @@
 replicaCount: 1
 
 image:
-  repository: ghcr.io/flink-chaos-operator/flink-chaos-operator
+  repository: mcolomervv/flink-chaos-operator
   pullPolicy: IfNotPresent
   tag: ""  # defaults to Chart.appVersion
 

@@ -1,6 +1,10 @@
 # Build stage
 FROM golang:1.25-alpine AS builder
 
+# TARGETOS/TARGETARCH are set automatically by docker buildx for multi-arch builds.
+ARG TARGETOS=linux
+ARG TARGETARCH=amd64
+
 WORKDIR /workspace
 
 COPY go.mod go.sum ./
@@ -10,7 +14,8 @@ COPY api/ api/
 COPY cmd/ cmd/
 COPY internal/ internal/
 
-RUN CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -a -o manager ./cmd/controller/
+RUN CGO_ENABLED=0 GOOS=${TARGETOS} GOARCH=${TARGETARCH} \
+    go build -a -ldflags="-s -w" -o manager ./cmd/controller/
 
 # Runtime stage
 FROM gcr.io/distroless/static:nonroot

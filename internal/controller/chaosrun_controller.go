@@ -30,11 +30,17 @@ import (
 	"k8s.io/client-go/tools/record"
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
+	"sigs.k8s.io/controller-runtime/pkg/controller/controllerutil"
 
 	"github.com/flink-chaos-operator/api/v1alpha1"
 	"github.com/flink-chaos-operator/internal/interfaces"
 	flinkrestpkg "github.com/flink-chaos-operator/internal/observer/flinkrest"
 )
+
+// chaosRunFinalizer is the finalizer added to ChaosRuns that own external
+// resources (NetworkPolicies, ephemeral containers). It prevents garbage
+// collection until cleanup is complete.
+const chaosRunFinalizer = "chaos.flink.io/cleanup"
 
 // SafetyCheckerIface is the subset of safety.Checker used by the reconciler.
 // Defined here to avoid a direct import of the safety package in controller
@@ -103,7 +109,30 @@ func (r *ChaosRunReconciler) Reconcile(ctx context.Context, req ctrl.Request) (c
 		return ctrl.Result{}, nil
 	}
 
-	// 3. Handle abort signal: if spec.control.abort is set and the run has
+	// 3. Handle deletion: if the run has been deleted and our finalizer is
+	//    present, run cleanup first to remove any NetworkPolicies or ephemeral
+	//    resources, then remove the finalizer.
+	if !run.DeletionTimestamp.IsZero() && controllerutil.ContainsFinalizer(run, chaosRunFinalizer) {
+		log.Info("ChaosRun deleted, running cleanup before removal")
+		if r.ScenarioDrivers != nil {
+			if driver, ok := r.ScenarioDrivers[run.Spec.Scenario.Type]; ok {
+				if cleanable, ok := driver.(interfaces.CleanableScenarioDriver); ok {
+					if err := cleanable.Cleanup(ctx, run); err != nil {
+						log.Error(err, "cleanup on delete failed, will retry")
+						return ctrl.Result{RequeueAfter: 5 * time.Second}, nil
+					}
+				}
+			}
+		}
+		runBase := run.DeepCopy()
+		controllerutil.RemoveFinalizer(run, chaosRunFinalizer)
+		if err := r.Patch(ctx, run, client.MergeFrom(runBase)); err != nil {
+			return ctrl.Result{}, err
+		}
+		return ctrl.Result{}, nil
+	}
+
+	// 4. Handle abort signal: if spec.control.abort is set and the run has
 	//    not yet reached a terminal phase, abort it. Network scenarios that
 	//    have already injected resources must first clean up — they are routed
 	//    through PhaseCleaningUp before being finalised as Aborted.
@@ -150,7 +179,7 @@ func (r *ChaosRunReconciler) Reconcile(ctx context.Context, req ctrl.Request) (c
 		return ctrl.Result{}, nil
 	}
 
-	// 4. Phase-based state machine.
+	// 5. Phase-based state machine.
 	switch run.Status.Phase {
 	case "", v1alpha1.PhasePending:
 		return r.reconcilePending(ctx, log, run)
@@ -409,6 +438,19 @@ func (r *ChaosRunReconciler) reconcileInjecting(ctx context.Context, log logr.Lo
 		return ctrl.Result{}, patchErr
 	}
 
+	// Add a finalizer for scenarios that create external resources (NetworkPolicies,
+	// ephemeral containers). This ensures cleanup runs before the object is deleted.
+	isNetworkScenario := run.Spec.Scenario.Type == v1alpha1.ScenarioNetworkPartition ||
+		run.Spec.Scenario.Type == v1alpha1.ScenarioNetworkChaos ||
+		run.Spec.Scenario.Type == v1alpha1.ScenarioResourceExhaustion
+	if isNetworkScenario && !controllerutil.ContainsFinalizer(run, chaosRunFinalizer) {
+		runBase := run.DeepCopy()
+		controllerutil.AddFinalizer(run, chaosRunFinalizer)
+		if err := r.Patch(ctx, run, client.MergeFrom(runBase)); err != nil {
+			return ctrl.Result{}, err
+		}
+	}
+
 	return r.transitionToObserving(ctx, run)
 }
 
@@ -491,6 +533,40 @@ func (r *ChaosRunReconciler) reconcileObserving(ctx context.Context, log logr.Lo
 				return ctrl.Result{}, err
 			}
 			return ctrl.Result{}, nil
+		}
+	}
+
+	// For NetworkPartition the disruption is held by NetworkPolicies for
+	// scenario.network.duration. Transition to CleaningUp when it elapses so
+	// policies are removed on schedule regardless of recovery observation.
+	if run.Spec.Scenario.Type == v1alpha1.ScenarioNetworkPartition {
+		if netSpec := run.Spec.Scenario.Network; netSpec != nil && netSpec.Duration != nil {
+			if run.Status.ObservingStartedAt != nil {
+				elapsed := time.Since(run.Status.ObservingStartedAt.Time)
+				if elapsed >= netSpec.Duration.Duration {
+					log.Info("network partition duration elapsed, transitioning to CleaningUp",
+						"duration", netSpec.Duration.Duration, "elapsed", elapsed)
+					// Use Inconclusive when recovery was not confirmed.
+					verdict := v1alpha1.VerdictInconclusive
+					msg := "network partition duration elapsed"
+					if run.Status.ReplacementObserved {
+						verdict = v1alpha1.VerdictPassed
+						msg = "network partition duration elapsed, recovery confirmed"
+					}
+					run.Status.Verdict = verdict
+					TransitionPhase(run, v1alpha1.PhaseCleaningUp, msg+", removing policies")
+					if err := r.Status().Patch(ctx, run, client.MergeFrom(runCopy)); err != nil {
+						return ctrl.Result{}, err
+					}
+					return ctrl.Result{Requeue: true}, nil
+				}
+				// Requeue when the remaining duration elapses.
+				remaining := netSpec.Duration.Duration - elapsed
+				if err := r.Status().Patch(ctx, run, client.MergeFrom(runCopy)); err != nil {
+					return ctrl.Result{}, err
+				}
+				return ctrl.Result{RequeueAfter: remaining}, nil
+			}
 		}
 	}
 
@@ -668,6 +744,23 @@ func (r *ChaosRunReconciler) reconcileCleaningUp(ctx context.Context, log logr.L
 	if patchErr := r.Status().Patch(ctx, run, client.MergeFrom(runCopy)); patchErr != nil {
 		return ctrl.Result{}, patchErr
 	}
+
+	// Remove the finalizer now that cleanup is complete and status is persisted.
+	// Re-fetch to avoid resource version conflicts with the status patch above.
+	if controllerutil.ContainsFinalizer(run, chaosRunFinalizer) {
+		fresh := &v1alpha1.ChaosRun{}
+		if err := r.Get(ctx, client.ObjectKeyFromObject(run), fresh); err != nil {
+			return ctrl.Result{}, err
+		}
+		if controllerutil.ContainsFinalizer(fresh, chaosRunFinalizer) {
+			freshBase := fresh.DeepCopy()
+			controllerutil.RemoveFinalizer(fresh, chaosRunFinalizer)
+			if err := r.Patch(ctx, fresh, client.MergeFrom(freshBase)); err != nil {
+				return ctrl.Result{}, err
+			}
+		}
+	}
+
 	return ctrl.Result{}, nil
 }
 

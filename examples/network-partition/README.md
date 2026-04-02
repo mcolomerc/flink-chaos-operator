@@ -24,10 +24,16 @@ Weave Net, etc.; does **not** work with the default Docker Desktop bridge networ
 ## Prerequisites
 
 - The Flink Chaos Operator is installed. See [Quick Start](../../docs/guidelines/quick-start.md).
-- Your cluster's **CNI plugin enforces NetworkPolicy** (Calico, Cilium, Weave Net).
-  > Docker Desktop uses a simple bridge network — NetworkPolicy objects are created
-  > but **not enforced**. The experiment will inject and clean up policies, but Flink
-  > will not actually experience the partition.
+- Your cluster's **CNI plugin enforces NetworkPolicy** (Calico, Cilium, Weave Net,
+  or **kube-router**).
+  > Docker Desktop's default `kindnet` CNI does **not** enforce NetworkPolicy.
+  > To enable enforcement on Docker Desktop, install `kube-router`:
+  > ```bash
+  > kubectl apply -f https://raw.githubusercontent.com/cloudnativelabs/kube-router/master/daemonset/kubeadm-kuberouter-all-features.yaml
+  > ```
+  > This adds iptables-based NetworkPolicy enforcement alongside `kindnet`
+  > without replacing the existing CNI. Verified working with Docker Desktop's
+  > 6-node kind cluster (kube-router v2.8+).
 - Flink pods have consistent labels. Check with:
   ```bash
   kubectl get pods -n vvp-jobs -l component=taskmanager --show-labels
@@ -109,12 +115,12 @@ netpart-tm-jm    Pending                          0s
 netpart-tm-jm    Injecting                        1s
 netpart-tm-jm    Observing                        2s   ← NetworkPolicies active
 netpart-tm-jm    CleaningUp                      32s   ← 30s duration expired
-netpart-tm-jm    Completed   Failed   pod-selector  35s  ← policies removed
+netpart-tm-jm    Completed   Inconclusive   pod-selector  35s  ← policies removed
 ```
 
-> `Failed` is expected without a Flink REST endpoint configured — the Kubernetes
-> observer cannot detect job-level reconnection. Add `observe.flinkRest` to get
-> a meaningful verdict.
+> `Inconclusive` is expected without a Flink REST endpoint configured — the
+> Kubernetes observer cannot detect job-level reconnection for a partition scenario
+> (TM pods stay Running). Add `observe.flinkRest` to get a `Passed` verdict.
 
 ### Verify NetworkPolicies while active
 
@@ -144,7 +150,7 @@ Example output:
   ],
   "injectedPods": ["job-xxx-taskmanager-yyy"],
   "phase": "Completed",
-  "verdict": "Failed"
+  "verdict": "Inconclusive"
 }
 ```
 
@@ -243,11 +249,15 @@ safety:
 Your CNI plugin does not enforce NetworkPolicy. Check:
 
 ```bash
-kubectl get pods -n kube-system | grep -i calico
-kubectl get pods -n kube-system | grep -i cilium
+kubectl get pods -n kube-system | grep -i "calico\|cilium\|kube-router"
 ```
 
-If neither is present, NetworkPartition is unsupported on your cluster.
+If none are present, install a NetworkPolicy-enforcing CNI. For Docker Desktop:
+
+```bash
+kubectl apply -f https://raw.githubusercontent.com/cloudnativelabs/kube-router/master/daemonset/kubeadm-kuberouter-all-features.yaml
+kubectl get pods -n kube-system -l app=kube-router   # wait for Running
+```
 
 ### Run stuck in CleaningUp
 

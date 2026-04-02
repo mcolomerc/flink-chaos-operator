@@ -1,0 +1,4 @@
+# Minimal image providing stress-ng for ResourceExhaustion ephemeral container injection.
+# Built and pushed to mcolomervv/flink-chaos-stress-tools as part of the release.
+FROM alpine:3.19
+RUN apk add --no-cache stress-ng

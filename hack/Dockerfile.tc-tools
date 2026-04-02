@@ -1,0 +1,4 @@
+# Minimal image providing tc(8) for NetworkChaos ephemeral container injection.
+# Built and pushed to mcolomervv/flink-chaos-tc-tools as part of the release.
+FROM alpine:3.19
+RUN apk add --no-cache iproute2

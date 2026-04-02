@@ -27,33 +27,16 @@ slow or unreliable networks.
 
 ### tc tool image
 
-The default `ghcr.io/flink-chaos-operator/tc-tools:latest` requires the image
-to be published. For local testing, build your own minimal image:
+The default image `mcolomervv/flink-chaos-tc-tools:latest` is built from
+`hack/Dockerfile.tc-tools` (alpine + iproute2) and published automatically
+with every release. No manual setup required.
 
-```bash
-# Build a minimal tc-tools image
-cat > Dockerfile.tc-tools <<'EOF'
-FROM alpine:3.19
-RUN apk add --no-cache iproute2
-EOF
-
-docker build -t <your-registry>/tc-tools:latest -f Dockerfile.tc-tools .
-docker push <your-registry>/tc-tools:latest
-```
-
-Configure the operator to use it:
+To override with a custom image:
 
 ```bash
 helm upgrade fchaos ./charts/flink-chaos-operator \
   --set networkchaos.tcImage=<your-registry>/tc-tools:latest \
   -n <operator-namespace>
-```
-
-Or in `values.yaml`:
-
-```yaml
-networkchaos:
-  tcImage: <your-registry>/tc-tools:latest
 ```
 
 ---

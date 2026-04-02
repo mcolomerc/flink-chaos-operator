@@ -30,32 +30,22 @@ step-by-step README.
 | Flink continues under CPU pressure | `ResourceExhaustion` — CPU |
 | Flink survives memory pressure / GC pauses | `ResourceExhaustion` — Memory |
 
-## Tool image requirements
+## Tool images
 
-`NetworkChaos` and `ResourceExhaustion` require ephemeral container images with
-specific tools. The defaults are placeholder images — build your own for local use:
+`NetworkChaos` and `ResourceExhaustion` use ephemeral containers with specific
+tools. Both images are built from sources in `hack/` and published to Docker Hub
+automatically with every release — no manual setup required:
 
-```bash
-# tc-tools (for NetworkChaos)
-cat > Dockerfile.tc-tools <<'EOF'
-FROM alpine:3.19
-RUN apk add --no-cache iproute2
-EOF
-docker build -t <your-registry>/tc-tools:latest -f Dockerfile.tc-tools .
+| Helm value | Default image | Used by |
+|------------|---------------|---------|
+| `networkchaos.tcImage` | `mcolomervv/flink-chaos-tc-tools:latest` | NetworkChaos |
+| `resourceExhaustion.stressImage` | `mcolomervv/flink-chaos-stress-tools:latest` | ResourceExhaustion |
 
-# stress-tools (for ResourceExhaustion)
-cat > Dockerfile.stress-tools <<'EOF'
-FROM alpine:3.19
-RUN apk add --no-cache stress-ng
-EOF
-docker build -t <your-registry>/stress-tools:latest -f Dockerfile.stress-tools .
-```
-
-Then configure the operator:
+To override either image, pass it via Helm:
 
 ```bash
 helm upgrade fchaos ./charts/flink-chaos-operator \
-  --set networkchaos.tcImage=<your-registry>/tc-tools:latest \
-  --set resourceExhaustion.stressImage=<your-registry>/stress-tools:latest \
+  --set networkchaos.tcImage=<custom>/tc-tools:tag \
+  --set resourceExhaustion.stressImage=<custom>/stress-tools:tag \
   -n <operator-namespace>
 ```

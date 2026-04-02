@@ -28,32 +28,16 @@ The operator waits for cleanup before finalising the verdict.
 
 ### stress-ng tool image
 
-The default `ghcr.io/flink-chaos-operator/stress-tools:latest` requires the
-image to be published. For local testing, build your own:
+The default image `mcolomervv/flink-chaos-stress-tools:latest` is built from
+`hack/Dockerfile.stress-tools` (alpine + stress-ng) and published automatically
+with every release. No manual setup required.
 
-```bash
-cat > Dockerfile.stress-tools <<'EOF'
-FROM alpine:3.19
-RUN apk add --no-cache stress-ng
-EOF
-
-docker build -t <your-registry>/stress-tools:latest -f Dockerfile.stress-tools .
-docker push <your-registry>/stress-tools:latest
-```
-
-Configure the operator to use it:
+To override with a custom image:
 
 ```bash
 helm upgrade fchaos ./charts/flink-chaos-operator \
   --set resourceExhaustion.stressImage=<your-registry>/stress-tools:latest \
   -n <operator-namespace>
-```
-
-Or in `values.yaml`:
-
-```yaml
-resourceExhaustion:
-  stressImage: <your-registry>/stress-tools:latest
 ```
 
 ---

@@ -304,6 +304,10 @@ func (in *ObservationStatus) DeepCopyInto(out *ObservationStatus) {
 		t := *in.RecoveryObservedAt
 		out.RecoveryObservedAt = &t
 	}
+	if in.RecoveryTimeSeconds != nil {
+		v := *in.RecoveryTimeSeconds
+		out.RecoveryTimeSeconds = &v
+	}
 }
 
 // DeepCopy returns a deep copy of ObservationStatus.

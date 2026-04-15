@@ -20,6 +20,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"strings"
 	"time"
 
 	"github.com/go-logr/logr"
@@ -87,14 +88,17 @@ func (r *ChaosRunReconciler) SetupWithManager(mgr ctrl.Manager) error {
 // Pending → Injecting → Observing → Completed/Aborted/Failed state machine.
 func (r *ChaosRunReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.Result, error) {
 	log := r.Log.WithValues("chaosRun", req.NamespacedName)
+	log.Info("Reconcile invoked")
 
 	// 1. Fetch the ChaosRun. If it no longer exists it has already been
 	//    deleted — nothing to do.
 	run := &v1alpha1.ChaosRun{}
 	if err := r.Get(ctx, req.NamespacedName, run); err != nil {
 		if apierrors.IsNotFound(err) {
+			log.Info("ChaosRun not found, skipping")
 			return ctrl.Result{}, nil
 		}
+		log.Error(err, "failed to get ChaosRun")
 		return ctrl.Result{}, err
 	}
 
@@ -428,6 +432,14 @@ func (r *ChaosRunReconciler) reconcileInjecting(ctx context.Context, log logr.Lo
 	run.Status.InjectedPods = result.InjectedPods
 	InjectionsTotal.WithLabelValues(string(run.Spec.Scenario.Type)).Inc()
 
+	// Capture the true pre-injection TM count here, while target is fresh.
+	// The observer computes tmCountBefore as live+injected, which becomes wrong
+	// after recovery (the replacement pod is live again, inflating the count).
+	if run.Status.Observation == nil {
+		run.Status.Observation = &v1alpha1.ObservationStatus{}
+	}
+	run.Status.Observation.TaskManagerCountBefore = len(target.TMPodNames)
+
 	log.Info("injection complete", "selected", result.SelectedPods,
 		"injected", result.InjectedPods)
 
@@ -458,6 +470,13 @@ func (r *ChaosRunReconciler) reconcileInjecting(ctx context.Context, log logr.Lo
 // ObservingStartedAt so the observation timeout is anchored to injection
 // completion rather than run start, and requeues after the poll interval.
 func (r *ChaosRunReconciler) transitionToObserving(ctx context.Context, run *v1alpha1.ChaosRun) (ctrl.Result, error) {
+	// Capture poll interval before the status patch — Status().Patch refreshes
+	// run from the server response, overwriting in-memory defaults applied by
+	// SetDefaults (PollInterval is never persisted to the spec). If we read it
+	// after the patch we would get 0s, which ctrl.Result{RequeueAfter: 0} does
+	// not honour (controller-runtime only schedules when RequeueAfter > 0).
+	pollInterval := run.Spec.Observe.PollInterval.Duration
+
 	runCopy := run.DeepCopy()
 	now := metav1.Now()
 	run.Status.ObservingStartedAt = &now
@@ -466,7 +485,7 @@ func (r *ChaosRunReconciler) transitionToObserving(ctx context.Context, run *v1a
 	if err := r.Status().Patch(ctx, run, client.MergeFrom(runCopy)); err != nil {
 		return ctrl.Result{}, err
 	}
-	return ctrl.Result{RequeueAfter: run.Spec.Observe.PollInterval.Duration}, nil
+	return ctrl.Result{RequeueAfter: pollInterval}, nil
 }
 
 // reconcileObserving handles the Observing phase.
@@ -474,6 +493,11 @@ func (r *ChaosRunReconciler) transitionToObserving(ctx context.Context, run *v1a
 // the next poll cycle.
 func (r *ChaosRunReconciler) reconcileObserving(ctx context.Context, log logr.Logger, run *v1alpha1.ChaosRun) (ctrl.Result, error) {
 	log.Info("reconciling observing run")
+
+	// Capture poll interval before any status patch — Status().Patch refreshes
+	// run from the server, overwriting in-memory defaults. PollInterval is set
+	// by SetDefaults but never persisted, so it reads back as 0s after a patch.
+	pollInterval := run.Spec.Observe.PollInterval.Duration
 
 	runCopy := run.DeepCopy()
 
@@ -509,30 +533,57 @@ func (r *ChaosRunReconciler) reconcileObserving(ctx context.Context, log logr.Lo
 	if observeAnchor != nil {
 		elapsed := time.Since(observeAnchor.Time)
 		if elapsed > run.Spec.Observe.Timeout.Duration {
-			log.Info("observation timeout reached", "elapsed", elapsed,
+			log.Info("observation window elapsed", "elapsed", elapsed,
 				"timeout", run.Spec.Observe.Timeout.Duration)
-			verdict := v1alpha1.VerdictFailed
-			msg := "recovery not observed before timeout"
-			if run.Status.ReplacementObserved {
-				verdict = v1alpha1.VerdictInconclusive
-				msg = "replacement observed but full recovery could not be confirmed before timeout"
-			}
-			if needsCleanup {
-				// Carry the pending verdict through CleaningUp so reconcileCleaningUp
-				// finalises the run with the correct outcome rather than VerdictPassed.
-				run.Status.Verdict = verdict
-				TransitionPhase(run, v1alpha1.PhaseCleaningUp, msg+", cleaning up network chaos resources")
+			thresholdSecs := int64(run.Spec.Observe.Timeout.Duration.Seconds())
+
+			// For TaskManagerPodKill: the observation window IS the experiment
+			// duration. Finalize based on whether recovery was observed during
+			// the window rather than whether it is ready right now.
+			var verdict v1alpha1.RunVerdict
+			var msg string
+			if !needsCleanup {
+				if run.Status.Observation != nil && run.Status.Observation.RecoveryObservedAt != nil {
+					recoverySecs := int64(0)
+					if run.Status.Observation.RecoveryTimeSeconds != nil {
+						recoverySecs = *run.Status.Observation.RecoveryTimeSeconds
+					}
+					verdict = v1alpha1.VerdictPassed
+					msg = fmt.Sprintf("killed pod recovered in %ds (observation window: %ds)", recoverySecs, thresholdSecs)
+				} else {
+					verdict = v1alpha1.VerdictFailed
+					msg = fmt.Sprintf("killed pod was not recovered within the %ds observation window", thresholdSecs)
+				}
+				FinalizeRun(run, verdict, msg)
+				r.finishRun(run, log)
 				if err := r.Status().Patch(ctx, run, client.MergeFrom(runCopy)); err != nil {
 					return ctrl.Result{}, err
 				}
-				return ctrl.Result{Requeue: true}, nil
+				return ctrl.Result{}, nil
 			}
-			FinalizeRun(run, verdict, msg)
-			r.finishRun(run, log)
+
+			// Build verdict and message based on scenario type.
+			// ResourceExhaustion always passes — stress ran for the full window.
+			// Network scenarios pass/fail based on whether Flink recovered.
+			if run.Spec.Scenario.Type == v1alpha1.ScenarioResourceExhaustion {
+				verdict = v1alpha1.VerdictPassed
+				msg = fmt.Sprintf("resource exhaustion ran for %ds", thresholdSecs)
+			} else if run.Status.Observation != nil && run.Status.Observation.RecoveryObservedAt != nil {
+				verdict = v1alpha1.VerdictPassed
+				msg = fmt.Sprintf("recovery confirmed within the %ds observation window", thresholdSecs)
+			} else if run.Status.ReplacementObserved {
+				verdict = v1alpha1.VerdictInconclusive
+				msg = fmt.Sprintf("replacement pod seen but full recovery not confirmed within the %ds observation window", thresholdSecs)
+			} else {
+				verdict = v1alpha1.VerdictFailed
+				msg = fmt.Sprintf("no Flink recovery detected within the %ds observation window", thresholdSecs)
+			}
+			run.Status.Verdict = verdict
+			TransitionPhase(run, v1alpha1.PhaseCleaningUp, msg+", cleaning up")
 			if err := r.Status().Patch(ctx, run, client.MergeFrom(runCopy)); err != nil {
 				return ctrl.Result{}, err
 			}
-			return ctrl.Result{}, nil
+			return ctrl.Result{Requeue: true}, nil
 		}
 	}
 
@@ -581,47 +632,61 @@ func (r *ChaosRunReconciler) reconcileObserving(ctx context.Context, log logr.Lo
 	obsResult, err := r.observeRecovery(ctx, run, target)
 	if err != nil {
 		log.Error(err, "observation poll error, will retry")
-		return ctrl.Result{RequeueAfter: run.Spec.Observe.PollInterval.Duration}, nil
+		return ctrl.Result{RequeueAfter: pollInterval}, nil
 	}
 
 	// Update observation status fields.
 	if run.Status.Observation == nil {
 		run.Status.Observation = &v1alpha1.ObservationStatus{}
 	}
-	run.Status.Observation.TaskManagerCountBefore = obsResult.TMCountBefore
+	// Preserve the injection-time TM count captured in reconcileInjecting —
+	// the observer's computed tmCountBefore inflates once the replacement pod
+	// is live (live_pods + injected = N+1 when N was the true before count).
+	if run.Status.Observation.TaskManagerCountBefore == 0 {
+		run.Status.Observation.TaskManagerCountBefore = obsResult.TMCountBefore
+	}
 	run.Status.Observation.TaskManagerCountAfter = obsResult.TMCountAfter
 	run.Status.ReplacementObserved = obsResult.ReplacementObserved
 
-	if obsResult.AllReplacementsReady {
+	// Record recovery the first time it is observed, but do not finalize yet —
+	// for TaskManagerPodKill the observation window runs for the full timeout so
+	// the user can see how long recovery took within the configured window.
+	// Network/ResourceExhaustion scenarios also use this path to record the
+	// recovery timestamp; they finalize when their duration elapses (above).
+	if obsResult.AllReplacementsReady && (run.Status.Observation == nil || run.Status.Observation.RecoveryObservedAt == nil) {
 		now := metav1.Now()
+		if run.Status.Observation == nil {
+			run.Status.Observation = &v1alpha1.ObservationStatus{}
+		}
 		run.Status.Observation.RecoveryObservedAt = &now
+		var recoveryMsg string
+		if observeAnchor != nil {
+			elapsed := time.Since(observeAnchor.Time)
+			secs := int64(elapsed.Seconds())
+			run.Status.Observation.RecoveryTimeSeconds = &secs
+			recoveryMsg = fmt.Sprintf("killed pod recovered in %ds", secs)
+		} else {
+			recoveryMsg = "killed pod recovered"
+		}
+		log.Info("recovery observed, continuing observation window", "recoveryMsg", recoveryMsg)
 		SetCondition(run, v1alpha1.ConditionRecoveryObserved,
-			metav1.ConditionTrue, "RecoveryObserved", "All replacement pods are ready")
-		if needsCleanup {
-			TransitionPhase(run, v1alpha1.PhaseCleaningUp, "recovery observed, cleaning up network chaos resources")
-			if err := r.Status().Patch(ctx, run, client.MergeFrom(runCopy)); err != nil {
-				return ctrl.Result{}, err
-			}
-			return ctrl.Result{Requeue: true}, nil
-		}
-		FinalizeRun(run, v1alpha1.VerdictPassed, "recovery observed")
-		r.finishRun(run, log)
-		r.Recorder.Event(run, corev1.EventTypeNormal, "RecoveryObserved",
-			"All replacement TaskManager pods are ready")
+			metav1.ConditionTrue, "RecoveryObserved", recoveryMsg)
+		r.Recorder.Event(run, corev1.EventTypeNormal, "RecoveryObserved", recoveryMsg)
 		RecoveryObservedTotal.Inc()
-		if err := r.Status().Patch(ctx, run, client.MergeFrom(runCopy)); err != nil {
-			return ctrl.Result{}, err
-		}
-		return ctrl.Result{}, nil
+		// Continue polling — finalization happens when the observation window elapses.
 	}
 
-	log.Info("recovery not yet observed, requeueing",
+	recoveryAlreadySeen := run.Status.Observation != nil && run.Status.Observation.RecoveryObservedAt != nil
+	log.Info("requeueing for next observation poll",
+		"recoveryAlreadySeen", recoveryAlreadySeen,
 		"replacementObserved", obsResult.ReplacementObserved,
-		"pollInterval", run.Spec.Observe.PollInterval.Duration)
+		"pollInterval", pollInterval)
 	if err := r.Status().Patch(ctx, run, client.MergeFrom(runCopy)); err != nil {
+		log.Error(err, "status patch failed in reconcileObserving")
 		return ctrl.Result{}, err
 	}
-	return ctrl.Result{RequeueAfter: run.Spec.Observe.PollInterval.Duration}, nil
+	log.Info("status patch ok, next poll scheduled", "pollInterval", pollInterval)
+	return ctrl.Result{RequeueAfter: pollInterval}, nil
 }
 
 // finishRun records terminal metrics for a run that has just reached a
@@ -731,9 +796,12 @@ func (r *ChaosRunReconciler) reconcileCleaningUp(ctx context.Context, log logr.L
 		if verdict == "" {
 			verdict = v1alpha1.VerdictPassed
 		}
-		finalMsg := "network chaos completed and cleaned up"
-		if verdict != v1alpha1.VerdictPassed && run.Status.Message != "" {
-			finalMsg = run.Status.Message + ", cleaned up"
+		// Use the scenario-specific message stored during the observation
+		// timeout transition, stripping the transitional ", cleaning up" suffix
+		// and replacing it with the final ", cleaned up".
+		finalMsg := "chaos experiment completed and cleaned up"
+		if run.Status.Message != "" {
+			finalMsg = strings.TrimSuffix(run.Status.Message, ", cleaning up") + ", cleaned up"
 		}
 		FinalizeRun(run, verdict, finalMsg)
 	}

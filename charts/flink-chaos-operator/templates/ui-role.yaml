@@ -1,0 +1,23 @@
+{{- if .Values.ui.enabled -}}
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: {{ include "flink-chaos-operator.fullname" . }}-ui
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "flink-chaos-operator.labels" . | nindent 4 }}
+    app.kubernetes.io/component: ui
+rules:
+  # Read topology: pods, services, and Flink ConfigMaps (checkpoint paths)
+  - apiGroups: [""]
+    resources: ["pods", "services", "configmaps"]
+    verbs: ["get", "list", "watch"]
+  # Read + write + delete ChaosRun experiments
+  - apiGroups: ["chaos.flink.io"]
+    resources: ["chaosruns"]
+    verbs: ["get", "list", "watch", "create", "update", "delete"]
+  # Read FlinkDeployment CRDs (Apache Flink Operator — may not be installed)
+  - apiGroups: ["flink.apache.org"]
+    resources: ["flinkdeployments"]
+    verbs: ["get", "list"]
+{{- end }}

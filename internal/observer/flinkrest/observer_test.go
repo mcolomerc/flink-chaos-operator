@@ -45,8 +45,16 @@ func (s *stubClient) TaskManagers(_ context.Context) (int, error) {
 	return s.tmCount, s.tmErr
 }
 
+func (s *stubClient) TaskManagerMetrics(_ context.Context) ([]flinkrest.TMMetrics, error) {
+	return nil, nil
+}
+
 func (s *stubClient) Checkpoints(_ context.Context) (*flinkrest.CheckpointSummary, error) {
 	return s.checkpoints, s.checkErr
+}
+
+func (s *stubClient) JobMetrics(_ context.Context) (*flinkrest.JobMetricsSummary, error) {
+	return nil, nil
 }
 
 // newObserver builds an Observer that always returns the given stub client,

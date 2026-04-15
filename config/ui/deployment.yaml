@@ -1,0 +1,53 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: flink-chaos-ui-server
+  namespace: vvp-jobs
+  labels:
+    app: flink-chaos-ui-server
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: flink-chaos-ui-server
+  template:
+    metadata:
+      labels:
+        app: flink-chaos-ui-server
+    spec:
+      serviceAccountName: flink-chaos-ui-server
+      containers:
+        - name: ui-server
+          image: mcolomervv/flink-chaos-ui-server:latest
+          imagePullPolicy: Always
+          ports:
+            - name: http
+              containerPort: 8090
+              protocol: TCP
+          env:
+            - name: POD_NAMESPACE
+              valueFrom:
+                fieldRef:
+                  fieldPath: metadata.namespace
+          args:
+            - --port=8090
+            # FLINK_ENDPOINT left unset: auto-discovers service with component=jobmanager
+          readinessProbe:
+            httpGet:
+              path: /healthz
+              port: 8090
+            initialDelaySeconds: 3
+            periodSeconds: 5
+          livenessProbe:
+            httpGet:
+              path: /healthz
+              port: 8090
+            initialDelaySeconds: 5
+            periodSeconds: 15
+          resources:
+            requests:
+              cpu: 50m
+              memory: 64Mi
+            limits:
+              cpu: 200m
+              memory: 128Mi

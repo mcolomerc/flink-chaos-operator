@@ -648,11 +648,11 @@ func (r *ChaosRunReconciler) reconcileObserving(ctx context.Context, log logr.Lo
 	run.Status.Observation.TaskManagerCountAfter = obsResult.TMCountAfter
 	run.Status.ReplacementObserved = obsResult.ReplacementObserved
 
-	// Record recovery the first time it is observed, but do not finalize yet —
-	// for TaskManagerPodKill the observation window runs for the full timeout so
-	// the user can see how long recovery took within the configured window.
-	// Network/ResourceExhaustion scenarios also use this path to record the
-	// recovery timestamp; they finalize when their duration elapses (above).
+	// When recovery is observed for the first time, record the timestamp and
+	// immediately finalize the run. For scenarios that require cleanup
+	// (NetworkChaos, NetworkPartition, ResourceExhaustion) transition to
+	// CleaningUp so the driver can remove injected resources. For
+	// TaskManagerPodKill (no cleanup needed) finalize directly with Passed.
 	if obsResult.AllReplacementsReady && (run.Status.Observation == nil || run.Status.Observation.RecoveryObservedAt == nil) {
 		now := metav1.Now()
 		if run.Status.Observation == nil {
@@ -664,16 +664,29 @@ func (r *ChaosRunReconciler) reconcileObserving(ctx context.Context, log logr.Lo
 			elapsed := time.Since(observeAnchor.Time)
 			secs := int64(elapsed.Seconds())
 			run.Status.Observation.RecoveryTimeSeconds = &secs
-			recoveryMsg = fmt.Sprintf("killed pod recovered in %ds", secs)
+			recoveryMsg = fmt.Sprintf("recovery confirmed in %ds", secs)
 		} else {
-			recoveryMsg = "killed pod recovered"
+			recoveryMsg = "recovery confirmed"
 		}
-		log.Info("recovery observed, continuing observation window", "recoveryMsg", recoveryMsg)
+		log.Info("recovery observed, finalizing run", "recoveryMsg", recoveryMsg)
 		SetCondition(run, v1alpha1.ConditionRecoveryObserved,
 			metav1.ConditionTrue, "RecoveryObserved", recoveryMsg)
 		r.Recorder.Event(run, corev1.EventTypeNormal, "RecoveryObserved", recoveryMsg)
 		RecoveryObservedTotal.Inc()
-		// Continue polling — finalization happens when the observation window elapses.
+
+		if needsCleanup {
+			TransitionPhase(run, v1alpha1.PhaseCleaningUp, recoveryMsg+", cleaning up")
+			if err := r.Status().Patch(ctx, run, client.MergeFrom(runCopy)); err != nil {
+				return ctrl.Result{}, err
+			}
+			return ctrl.Result{Requeue: true}, nil
+		}
+		FinalizeRun(run, v1alpha1.VerdictPassed, recoveryMsg)
+		r.finishRun(run, log)
+		if err := r.Status().Patch(ctx, run, client.MergeFrom(runCopy)); err != nil {
+			return ctrl.Result{}, err
+		}
+		return ctrl.Result{}, nil
 	}
 
 	recoveryAlreadySeen := run.Status.Observation != nil && run.Status.Observation.RecoveryObservedAt != nil

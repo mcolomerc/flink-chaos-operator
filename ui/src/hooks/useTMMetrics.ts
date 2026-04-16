@@ -1,3 +1,4 @@
+import { useMemo } from 'react'
 import { useQuery } from '@tanstack/react-query'
 import { fetchTMMetrics, type TMMetrics } from '../api/client'
 import { useAppStore } from '../store'
@@ -18,9 +19,11 @@ export function useTMMetrics(): Map<string, TMMetrics> {
     placeholderData: [],
   })
 
-  const map = new Map<string, TMMetrics>()
-  for (const m of data ?? []) {
-    if (m.podIP) map.set(m.podIP, m)
-  }
-  return map
+  return useMemo(() => {
+    const map = new Map<string, TMMetrics>()
+    for (const m of data ?? []) {
+      if (m.podIP) map.set(m.podIP, m)
+    }
+    return map
+  }, [data])
 }

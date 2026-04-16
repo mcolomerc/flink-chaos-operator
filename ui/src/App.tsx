@@ -1,3 +1,4 @@
+import { useEffect } from 'react'
 import { QueryClient, QueryClientProvider, useQuery } from '@tanstack/react-query'
 import FlinkGraph from './components/topology/FlinkGraph'
 import ChaosRunList from './components/chaos/ChaosRunList'
@@ -16,7 +17,7 @@ const queryClient = new QueryClient({
 })
 
 function AppLayout() {
-  useTopology()
+  const { checkpointEndpoint } = useTopology()
   useSSE()
 
   const flinkMetrics = useFlinkMetrics()
@@ -24,15 +25,6 @@ function AppLayout() {
   const selectedDeploymentName = useAppStore((s) => s.selectedDeploymentName)
   const setSelectedDeployment = useAppStore((s) => s.setSelectedDeployment)
   const openWizard = useAppStore((s) => s.openWizard)
-
-  const { data: topology } = useQuery({
-    queryKey: ['topology', selectedDeploymentName],
-    queryFn: () => import('./api/client').then(({ fetchTopology }) => fetchTopology(selectedDeploymentName ?? undefined)),
-    refetchInterval: 30_000,
-    retry: 1,
-  })
-
-  const checkpointEndpoint = topology?.externalConnections?.find((c) => c.purpose === 'checkpoint')?.endpoint
 
   const { data: deployments = [] } = useQuery({
     queryKey: ['deployments'],
@@ -46,9 +38,11 @@ function AppLayout() {
   const effectiveSelection = selectedDeploymentName ?? firstDeployment
 
   // Write the auto-selection back to the store so topology/metrics pick it up.
-  if (selectedDeploymentName === null && firstDeployment !== null) {
-    setSelectedDeployment(firstDeployment)
-  }
+  useEffect(() => {
+    if (selectedDeploymentName === null && firstDeployment !== null) {
+      setSelectedDeployment(firstDeployment)
+    }
+  }, [firstDeployment, selectedDeploymentName, setSelectedDeployment])
 
   return (
     <div className="flex flex-col w-full h-full overflow-hidden bg-slate-900">

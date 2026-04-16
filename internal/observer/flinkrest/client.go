@@ -25,6 +25,8 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"strings"
+	"sync"
 	"time"
 )
 
@@ -224,7 +226,7 @@ func fetchTMMetrics(ctx context.Context, c *HTTPClient, tmID string) TMMetrics {
 	m := TMMetrics{TMID: tmID, CPULoad: -1}
 
 	// Extract pod IP from the TM id which has the form "{ip}:{port}-{suffix}".
-	if idx := indexOf(tmID, ':'); idx > 0 {
+	if idx := strings.IndexByte(tmID, ':'); idx > 0 {
 		m.PodIP = tmID[:idx]
 	}
 
@@ -279,16 +281,6 @@ func fetchTMMetrics(ctx context.Context, c *HTTPClient, tmID string) TMMetrics {
 		m.HeapPercent = pct
 	}
 	return m
-}
-
-// indexOf returns the index of the first occurrence of b in s, or -1.
-func indexOf(s string, b byte) int {
-	for i := 0; i < len(s); i++ {
-		if s[i] == b {
-			return i
-		}
-	}
-	return -1
 }
 
 // JobMetrics implements Client by fetching checkpoint metrics from
@@ -545,23 +537,33 @@ func (c *HTTPClient) decodeVertexThroughput(body io.Reader, summary *JobMetricsS
 }
 
 // fetchVertexRates queries per-second throughput rates from the vertex subtask
-// metrics endpoint for each vertex and sums the results into summary.
+// metrics endpoint for each vertex concurrently and sums the results into summary.
 // This is the correct approach for Ververica Platform where job-level rate
 // metrics are not aggregated but vertex subtask metrics are available.
 func (c *HTTPClient) fetchVertexRates(ctx context.Context, jobID string, vertexIDs []string, summary *JobMetricsSummary) {
 	const metricsParam = "numRecordsInPerSecond,numRecordsOutPerSecond,numBytesInPerSecond,numBytesOutPerSecond"
+
+	var (
+		mu sync.Mutex
+		wg sync.WaitGroup
+	)
+
 	for _, vid := range vertexIDs {
-		url := fmt.Sprintf("%s/jobs/%s/vertices/%s/subtasks/metrics?get=%s&agg=sum",
-			c.BaseURL, jobID, vid, metricsParam)
-		req, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
-		if err != nil {
-			continue
-		}
-		resp, err := c.HTTPClient.Do(req)
-		if err != nil {
-			continue
-		}
-		func() {
+		vid := vid
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+
+			url := fmt.Sprintf("%s/jobs/%s/vertices/%s/subtasks/metrics?get=%s&agg=sum",
+				c.BaseURL, jobID, vid, metricsParam)
+			req, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
+			if err != nil {
+				return
+			}
+			resp, err := c.HTTPClient.Do(req)
+			if err != nil {
+				return
+			}
 			defer resp.Body.Close()
 			if resp.StatusCode != http.StatusOK {
 				return
@@ -573,6 +575,9 @@ func (c *HTTPClient) fetchVertexRates(ctx context.Context, jobID string, vertexI
 			if err := json.NewDecoder(resp.Body).Decode(&items); err != nil {
 				return
 			}
+
+			mu.Lock()
+			defer mu.Unlock()
 			for _, item := range items {
 				switch item.ID {
 				case "numRecordsInPerSecond":
@@ -587,4 +592,5 @@ func (c *HTTPClient) fetchVertexRates(ctx context.Context, jobID string, vertexI
 			}
 		}()
 	}
+	wg.Wait()
 }

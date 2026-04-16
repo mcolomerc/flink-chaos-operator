@@ -1,5 +1,6 @@
 import { useEffect } from 'react'
 import { useQueryClient } from '@tanstack/react-query'
+import { useAppStore } from '../store'
 
 /**
  * Subscribes to the /api/events Server-Sent Events stream.
@@ -9,6 +10,7 @@ import { useQueryClient } from '@tanstack/react-query'
  */
 export function useSSE() {
   const queryClient = useQueryClient()
+  const selectedDeploymentName = useAppStore((s) => s.selectedDeploymentName)
 
   useEffect(() => {
     const es = new EventSource('/api/events')
@@ -17,8 +19,8 @@ export function useSSE() {
       try {
         const msg = JSON.parse(event.data as string) as { type: string }
         if (msg.type === 'chaosrun_update') {
-          void queryClient.invalidateQueries({ queryKey: ['topology'] })
-          void queryClient.invalidateQueries({ queryKey: ['chaosRuns'] })
+          void queryClient.invalidateQueries({ queryKey: ['topology', selectedDeploymentName] })
+          void queryClient.invalidateQueries({ queryKey: ['chaosRuns', selectedDeploymentName ?? undefined] })
         }
       } catch {
         // ignore malformed frames
@@ -31,5 +33,5 @@ export function useSSE() {
     return () => {
       es.close()
     }
-  }, [queryClient])
+  }, [queryClient, selectedDeploymentName])
 }

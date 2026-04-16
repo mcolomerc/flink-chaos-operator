@@ -110,6 +110,10 @@ func getChaosRunHandler(cfg Config) http.HandlerFunc {
 			writeError(w, http.StatusBadRequest, "name is required")
 			return
 		}
+		if !validK8sName.MatchString(name) {
+			writeError(w, http.StatusBadRequest, "invalid resource name")
+			return
+		}
 
 		run := &v1alpha1.ChaosRun{}
 		key := types.NamespacedName{Name: name, Namespace: cfg.Namespace}

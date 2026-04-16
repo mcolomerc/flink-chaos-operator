@@ -267,7 +267,7 @@ export default function JobMetricsPanel({ jobs, taskManagerCount, jobMetrics, is
                 </div>
                 <div className="flex flex-col gap-1 overflow-y-auto flex-1 min-h-0">
                   {jobMetrics.vertices.map((v: VertexDetail, i: number) => (
-                    <div key={i} className="flex items-start gap-1 min-w-0">
+                    <div key={`${v.name}-${i}`} className="flex items-start gap-1 min-w-0">
                       <span className={`flex-shrink-0 text-[9px] font-bold leading-tight pt-px ${vertexStatusClass(v.status)}`}>
                         ●
                       </span>

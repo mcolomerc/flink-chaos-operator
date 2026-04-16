@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from 'react'
 import { useQuery } from '@tanstack/react-query'
-import { fetchFlinkJobs, fetchFlinkTaskManagers, fetchFlinkCheckpoints, fetchFlinkJobMetrics } from '../api/client'
+import { fetchFlinkJobs, fetchFlinkTaskManagers, fetchFlinkCheckpoints, fetchFlinkJobMetrics, ApiError } from '../api/client'
 import type { FlinkJob, FlinkJobMetrics } from '../api/client'
 import { useAppStore } from '../store'
 
@@ -53,6 +53,12 @@ export function useFlinkMetrics(): FlinkMetrics {
     lastTriggerRef.current = null
     lastJobMetricsRef.current = null
     setTick((t) => t + 1)
+    return () => {
+      checkpointHistoryRef.current = []
+      throughputHistoryRef.current = []
+      lastTriggerRef.current = null
+      lastJobMetricsRef.current = null
+    }
   }, [selectedDeploymentName])
 
   const jobsQuery = useQuery({
@@ -147,7 +153,7 @@ export function useFlinkMetrics(): FlinkMetrics {
   }, [jobMetricsQuery.data])
 
   const isUnavailable =
-    (jobsQuery.error as { message?: string } | null)?.message?.includes('503') ?? false
+    jobsQuery.error instanceof ApiError && jobsQuery.error.status === 503
 
   const isLoading =
     jobsQuery.isLoading || tmQuery.isLoading || checkpointQuery.isLoading

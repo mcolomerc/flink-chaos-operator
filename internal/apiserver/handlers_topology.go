@@ -417,10 +417,7 @@ func listActiveChaosRuns(ctx context.Context, cfg Config) ([]ActiveChaosRunSumma
 			targetPods = run.Status.SelectedPods
 		}
 
-		var startedAt string
-		if run.Status.StartedAt != nil && !run.Status.StartedAt.IsZero() {
-			startedAt = run.Status.StartedAt.UTC().Format("2006-01-02T15:04:05Z07:00")
-		}
+		startedAt := rfc3339(run.Status.StartedAt)
 
 		result = append(result, ActiveChaosRunSummary{
 			Name:       run.Name,

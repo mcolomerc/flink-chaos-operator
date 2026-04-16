@@ -20,9 +20,9 @@ package apiserver
 
 import (
 	"encoding/json"
-	"fmt"
 	"log/slog"
 	"net/http"
+	"regexp"
 	"time"
 
 	k8serrors "k8s.io/apimachinery/pkg/api/errors"
@@ -31,6 +31,10 @@ import (
 
 	v1alpha1 "github.com/flink-chaos-operator/api/v1alpha1"
 )
+
+// validK8sName matches valid Kubernetes object names (RFC 1123 DNS subdomain).
+// Allows single-character names as well as names up to 253 characters.
+var validK8sName = regexp.MustCompile(`^[a-z0-9][a-z0-9\-]{0,251}[a-z0-9]$|^[a-z0-9]$`)
 
 // CreateChaosRunRequest is the JSON body accepted by POST /api/chaosruns.
 type CreateChaosRunRequest struct {
@@ -70,6 +74,7 @@ type CreateChaosRunRequest struct {
 // It decodes the request body, builds a ChaosRun object, and creates it in Kubernetes.
 func createChaosRunHandler(cfg Config) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
+		r.Body = http.MaxBytesReader(w, r.Body, 1<<20)
 		var req CreateChaosRunRequest
 		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 			writeError(w, http.StatusBadRequest, "invalid request body: "+err.Error())
@@ -84,7 +89,29 @@ func createChaosRunHandler(cfg Config) http.HandlerFunc {
 			writeError(w, http.StatusBadRequest, "scenarioType is required")
 			return
 		}
-		name := fmt.Sprintf("chaos-run-%x", time.Now().UnixMilli())
+
+		// Validate scenarioType is a known enum value.
+		switch v1alpha1.ScenarioType(req.ScenarioType) {
+		case v1alpha1.ScenarioTaskManagerPodKill,
+			v1alpha1.ScenarioNetworkPartition,
+			v1alpha1.ScenarioNetworkChaos,
+			v1alpha1.ScenarioResourceExhaustion:
+			// valid
+		default:
+			writeError(w, http.StatusBadRequest, "unknown scenarioType: "+req.ScenarioType)
+			return
+		}
+
+		// Validate selectionMode when provided.
+		if req.SelectionMode != "" {
+			switch v1alpha1.SelectionMode(req.SelectionMode) {
+			case v1alpha1.SelectionModeRandom, v1alpha1.SelectionModeExplicit:
+				// valid
+			default:
+				writeError(w, http.StatusBadRequest, "unknown selectionMode: "+req.SelectionMode)
+				return
+			}
+		}
 
 		run := v1alpha1.ChaosRun{
 			TypeMeta: metav1.TypeMeta{
@@ -92,8 +119,8 @@ func createChaosRunHandler(cfg Config) http.HandlerFunc {
 				Kind:       "ChaosRun",
 			},
 			ObjectMeta: metav1.ObjectMeta{
-				Name:      name,
-				Namespace: cfg.Namespace,
+				GenerateName: "chaos-run-",
+				Namespace:    cfg.Namespace,
 			},
 			Spec: v1alpha1.ChaosRunSpec{
 				Target: buildTargetSpec(req),
@@ -146,7 +173,7 @@ func createChaosRunHandler(cfg Config) http.HandlerFunc {
 
 		ctx := r.Context()
 		if err := cfg.Client.Create(ctx, &run); err != nil {
-			slog.Error("create chaosrun", "name", name, "error", err)
+			slog.Error("create chaosrun", "generateName", run.GenerateName, "error", err)
 			writeError(w, http.StatusInternalServerError, "failed to create ChaosRun")
 			return
 		}
@@ -165,6 +192,10 @@ func abortChaosRunHandler(cfg Config) http.HandlerFunc {
 		name := r.PathValue("name")
 		if name == "" {
 			writeError(w, http.StatusBadRequest, "name is required")
+			return
+		}
+		if !validK8sName.MatchString(name) {
+			writeError(w, http.StatusBadRequest, "invalid resource name")
 			return
 		}
 
@@ -201,6 +232,10 @@ func deleteChaosRunHandler(cfg Config) http.HandlerFunc {
 		name := r.PathValue("name")
 		if name == "" {
 			writeError(w, http.StatusBadRequest, "name is required")
+			return
+		}
+		if !validK8sName.MatchString(name) {
+			writeError(w, http.StatusBadRequest, "invalid resource name")
 			return
 		}
 

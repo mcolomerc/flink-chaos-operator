@@ -5,15 +5,11 @@ import {
   BackgroundVariant,
   Controls,
   MiniMap,
-  useNodesState,
-  useEdgesState,
   type NodeTypes,
   type EdgeTypes,
   type Node,
-  type Edge,
 } from '@xyflow/react'
 import { useTopology } from '../../hooks/useTopology'
-import type { FlinkNodeData } from '../../hooks/useTopology'
 import { useAppStore } from '../../store'
 import JobManagerNode from './nodes/JobManagerNode'
 import TaskManagerNode from './nodes/TaskManagerNode'
@@ -45,21 +41,15 @@ export default function FlinkGraph() {
   const {
     nodes: topologyNodes,
     edges: topologyEdges,
+    onNodesChange,
+    onEdgesChange,
     hasDeployment,
     isLoading,
     error,
   } = useTopology()
 
-  const [nodes, setNodes, onNodesChange] = useNodesState<Node<FlinkNodeData>>([])
-  const [edges, setEdges, onEdgesChange] = useEdgesState<Edge>([])
-
   const rfInstance = useRef<{ fitView: (opts?: { padding?: number; duration?: number }) => void } | null>(null)
   const metricsExpanded = useAppStore((s) => s.metricsExpanded)
-
-  useEffect(() => {
-    setNodes(topologyNodes)
-    setEdges(topologyEdges)
-  }, [topologyNodes, topologyEdges, setNodes, setEdges])
 
   // Re-fit whenever the metrics panel is toggled (container height changes).
   useEffect(() => {
@@ -71,8 +61,8 @@ export default function FlinkGraph() {
   return (
     <div className="relative w-full h-full">
       <ReactFlow
-        nodes={nodes}
-        edges={edges}
+        nodes={topologyNodes}
+        edges={topologyEdges}
         onNodesChange={onNodesChange}
         onEdgesChange={onEdgesChange}
         nodeTypes={nodeTypes}
@@ -119,7 +109,7 @@ export default function FlinkGraph() {
       )}
 
       {/* Empty state (connected but no JMs detected) */}
-      {!isLoading && !error && !hasDeployment && nodes.length === 0 && (
+      {!isLoading && !error && !hasDeployment && topologyNodes.length === 0 && (
         <div className="absolute inset-0 flex items-center justify-center pointer-events-none">
           <div className="text-center px-6 py-4 rounded-lg border border-slate-700 bg-slate-800/80">
             <p className="text-slate-300 font-semibold mb-1">No Flink deployment detected</p>

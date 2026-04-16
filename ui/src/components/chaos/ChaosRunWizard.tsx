@@ -68,10 +68,18 @@ const DEFAULT_FORM: WizardForm = {
 
 // ── YAML builder ──────────────────────────────────────────────────────────
 
+function yamlStr(v: string): string {
+  if (!v) return "''"
+  if (/[:#\[\]{},|>&!'"@`]/.test(v) || v !== v.trim() || v.includes('\n')) {
+    return `'${v.replace(/'/g, "''")}'`
+  }
+  return v
+}
+
 function buildYAML(target: WizardTarget, form: WizardForm): string {
   const targetLines = target.targetType === 'VervericaDeployment'
-    ? `    type: VervericaDeployment\n    deploymentName: ${target.deploymentName}${target.deploymentId ? `\n    deploymentId: ${target.deploymentId}` : ''}${target.vvpNamespace ? `\n    vvpNamespace: ${target.vvpNamespace}` : ''}`
-    : `    type: FlinkDeployment\n    name: ${target.deploymentName}`
+    ? `    type: VervericaDeployment\n    deploymentName: ${yamlStr(target.deploymentName)}${target.deploymentId ? `\n    deploymentId: ${yamlStr(target.deploymentId)}` : ''}${target.vvpNamespace ? `\n    vvpNamespace: ${yamlStr(target.vvpNamespace)}` : ''}`
+    : `    type: FlinkDeployment\n    name: ${yamlStr(target.deploymentName)}`
 
   const base = `apiVersion: chaos.flink.io/v1alpha1
 kind: ChaosRun
@@ -97,8 +105,8 @@ ${targetLines}
   } else if (form.scenarioType === 'NetworkPartition') {
     const extLines = form.externalHostname || form.externalCIDR
       ? `\n      externalEndpoint:\n` +
-        (form.externalHostname ? `        hostname: ${form.externalHostname}\n` : '') +
-        (form.externalCIDR ? `        cidr: ${form.externalCIDR}\n` : '') +
+        (form.externalHostname ? `        hostname: ${yamlStr(form.externalHostname)}\n` : '') +
+        (form.externalCIDR ? `        cidr: ${yamlStr(form.externalCIDR)}\n` : '') +
         (form.externalPort > 0 ? `        port: ${form.externalPort}\n` : '')
       : ''
     scenarioSection = `
@@ -106,11 +114,11 @@ ${targetLines}
       target: ${form.networkTarget}
       direction: ${form.networkDirection}${extLines}      duration: ${form.durationSeconds}s`
   } else if (form.scenarioType === 'NetworkChaos') {
-    const bwLine = form.bandwidth ? `\n      bandwidth: ${form.bandwidth}` : ''
+    const bwLine = form.bandwidth ? `\n      bandwidth: ${yamlStr(form.bandwidth)}` : ''
     const extLines = form.externalHostname || form.externalCIDR
       ? `\n      externalEndpoint:\n` +
-        (form.externalHostname ? `        hostname: ${form.externalHostname}\n` : '') +
-        (form.externalCIDR ? `        cidr: ${form.externalCIDR}\n` : '') +
+        (form.externalHostname ? `        hostname: ${yamlStr(form.externalHostname)}\n` : '') +
+        (form.externalCIDR ? `        cidr: ${yamlStr(form.externalCIDR)}\n` : '') +
         (form.externalPort > 0 ? `        port: ${form.externalPort}\n` : '')
       : ''
     scenarioSection = `
@@ -226,10 +234,22 @@ const inputCls =
   'bg-slate-900 border border-slate-600 rounded px-2 py-1.5 text-slate-100 text-sm w-full focus:outline-none focus:border-blue-500'
 const labelCls = 'text-slate-400 text-xs mb-1 block'
 
-function FieldGroup({ label, children }: { label: string; children: React.ReactNode }) {
+function FieldGroup({
+  label,
+  htmlFor,
+  children,
+}: {
+  label: string
+  htmlFor?: string
+  children: React.ReactNode
+}) {
   return (
     <div>
-      <label className={labelCls}>{label}</label>
+      {htmlFor ? (
+        <label htmlFor={htmlFor} className={labelCls}>{label}</label>
+      ) : (
+        <div role="group" aria-label={label} className={labelCls}>{label}</div>
+      )}
       {children}
     </div>
   )
@@ -285,8 +305,9 @@ function Step2Params({
 
       {scenarioType === 'TaskManagerPodKill' && (
         <>
-          <FieldGroup label="Pods to kill">
+          <FieldGroup label="Pods to kill" htmlFor="wiz-selection-count">
             <input
+              id="wiz-selection-count"
               type="number"
               min={1}
               max={20}
@@ -295,8 +316,9 @@ function Step2Params({
               className={inputCls}
             />
           </FieldGroup>
-          <FieldGroup label="Grace period (seconds) — 0 = immediate">
+          <FieldGroup label="Grace period (seconds) — 0 = immediate" htmlFor="wiz-grace-period">
             <input
+              id="wiz-grace-period"
               type="number"
               min={0}
               value={form.gracePeriod}
@@ -304,8 +326,9 @@ function Step2Params({
               className={inputCls}
             />
           </FieldGroup>
-          <FieldGroup label="Recovery timeout (seconds) — how long to wait for the pod to restart">
+          <FieldGroup label="Recovery timeout (seconds) — how long to wait for the pod to restart" htmlFor="wiz-duration-podkill">
             <input
+              id="wiz-duration-podkill"
               type="number"
               min={10}
               value={form.durationSeconds}
@@ -318,8 +341,9 @@ function Step2Params({
 
       {(scenarioType === 'NetworkPartition' || scenarioType === 'NetworkChaos') && (
         <>
-          <FieldGroup label="Network target">
+          <FieldGroup label="Network target" htmlFor="wiz-network-target">
             <select
+              id="wiz-network-target"
               value={form.networkTarget}
               onChange={(e) => handleNetworkTargetChange(e.target.value)}
               className={inputCls}
@@ -345,8 +369,9 @@ function Step2Params({
                 </div>
               )}
 
-              <FieldGroup label={`External CIDR${scenarioType === 'NetworkPartition' ? ' *required*' : ' (optional for NetworkChaos)'} — e.g. 52.216.0.0/15`}>
+              <FieldGroup label={`External CIDR${scenarioType === 'NetworkPartition' ? ' *required*' : ' (optional for NetworkChaos)'} — e.g. 52.216.0.0/15`} htmlFor="wiz-external-cidr">
                 <input
+                  id="wiz-external-cidr"
                   type="text"
                   value={form.externalCIDR}
                   onChange={(e) => setField('externalCIDR', e.target.value)}
@@ -363,8 +388,9 @@ function Step2Params({
                 )}
               </FieldGroup>
 
-              <FieldGroup label="External hostname (NetworkChaos only, e.g. s3.amazonaws.com)">
+              <FieldGroup label="External hostname (NetworkChaos only, e.g. s3.amazonaws.com)" htmlFor="wiz-external-hostname">
                 <input
+                  id="wiz-external-hostname"
                   type="text"
                   value={form.externalHostname}
                   onChange={(e) => setField('externalHostname', e.target.value)}
@@ -378,8 +404,9 @@ function Step2Params({
                 />
               </FieldGroup>
 
-              <FieldGroup label="Port (optional, 0 = all ports)">
+              <FieldGroup label="Port (optional, 0 = all ports)" htmlFor="wiz-external-port">
                 <input
+                  id="wiz-external-port"
                   type="number"
                   min={0}
                   max={65535}
@@ -390,8 +417,9 @@ function Step2Params({
               </FieldGroup>
             </>
           )}
-          <FieldGroup label="Direction">
+          <FieldGroup label="Direction" htmlFor="wiz-direction">
             <select
+              id="wiz-direction"
               value={form.networkDirection}
               onChange={(e) => setField('networkDirection', e.target.value)}
               className={inputCls}
@@ -408,8 +436,9 @@ function Step2Params({
 
       {scenarioType === 'NetworkChaos' && (
         <>
-          <FieldGroup label="Latency (ms)">
+          <FieldGroup label="Latency (ms)" htmlFor="wiz-latency">
             <input
+              id="wiz-latency"
               type="number"
               min={0}
               value={form.latencyMs}
@@ -417,8 +446,9 @@ function Step2Params({
               className={inputCls}
             />
           </FieldGroup>
-          <FieldGroup label="Jitter (ms)">
+          <FieldGroup label="Jitter (ms)" htmlFor="wiz-jitter">
             <input
+              id="wiz-jitter"
               type="number"
               min={0}
               value={form.jitterMs}
@@ -426,8 +456,9 @@ function Step2Params({
               className={inputCls}
             />
           </FieldGroup>
-          <FieldGroup label="Packet loss (%)">
+          <FieldGroup label="Packet loss (%)" htmlFor="wiz-loss">
             <input
+              id="wiz-loss"
               type="number"
               min={0}
               max={100}
@@ -436,8 +467,9 @@ function Step2Params({
               className={inputCls}
             />
           </FieldGroup>
-          <FieldGroup label="Bandwidth limit (e.g. 10mbit)">
+          <FieldGroup label="Bandwidth limit (e.g. 10mbit)" htmlFor="wiz-bandwidth">
             <input
+              id="wiz-bandwidth"
               type="text"
               value={form.bandwidth}
               onChange={(e) => setField('bandwidth', e.target.value)}
@@ -449,8 +481,9 @@ function Step2Params({
       )}
 
       {(scenarioType === 'NetworkPartition' || scenarioType === 'NetworkChaos') && (
-        <FieldGroup label="Duration (seconds)">
+        <FieldGroup label="Duration (seconds)" htmlFor="wiz-duration-network">
           <input
+            id="wiz-duration-network"
             type="number"
             min={1}
             value={form.durationSeconds}
@@ -479,8 +512,9 @@ function Step2Params({
               ))}
             </div>
           </FieldGroup>
-          <FieldGroup label={form.resourceMode === 'Memory' ? 'VM workers — parallel stress-ng --vm processes, each allocating Memory %' : 'CPU workers — parallel stress-ng --cpu threads (1 = one full core saturated)'}>
+          <FieldGroup label={form.resourceMode === 'Memory' ? 'VM workers — parallel stress-ng --vm processes, each allocating Memory %' : 'CPU workers — parallel stress-ng --cpu threads (1 = one full core saturated)'} htmlFor="wiz-workers">
             <input
+              id="wiz-workers"
               type="number"
               min={1}
               value={form.workers}
@@ -489,8 +523,9 @@ function Step2Params({
             />
           </FieldGroup>
           {form.resourceMode === 'Memory' && (
-            <FieldGroup label="Memory %">
+            <FieldGroup label="Memory %" htmlFor="wiz-memory-percent">
               <input
+                id="wiz-memory-percent"
                 type="number"
                 min={1}
                 max={100}
@@ -500,8 +535,9 @@ function Step2Params({
               />
             </FieldGroup>
           )}
-          <FieldGroup label="Duration (seconds)">
+          <FieldGroup label="Duration (seconds)" htmlFor="wiz-duration-resource">
             <input
+              id="wiz-duration-resource"
               type="number"
               min={1}
               value={form.durationSeconds}
@@ -526,8 +562,9 @@ function Step3Safety({
 }) {
   return (
     <div className="space-y-5">
-      <FieldGroup label="Minimum TaskManagers to keep running">
+      <FieldGroup label="Minimum TaskManagers to keep running" htmlFor="wiz-min-task-managers">
         <input
+          id="wiz-min-task-managers"
           type="number"
           min={0}
           value={form.minTaskManagers}

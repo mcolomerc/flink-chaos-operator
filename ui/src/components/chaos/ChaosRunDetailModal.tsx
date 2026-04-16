@@ -1,6 +1,7 @@
-import { useEffect } from 'react'
+import { useEffect, useRef } from 'react'
 import { useQuery } from '@tanstack/react-query'
 import { fetchChaosRun } from '../../api/client'
+import type { ChaosRunDetail } from '../../api/client'
 import { useAppStore } from '../../store'
 import type { CheckpointSample, ThroughputSample } from '../../hooks/useFlinkMetrics'
 
@@ -75,7 +76,7 @@ function PodList({ pods }: { pods: string[] }) {
 
 // ── Recovery banner ───────────────────────────────────────────────────────────
 
-function RecoveryResultBanner({ data }: { data: ReturnType<typeof fetchChaosRun> extends Promise<infer T> ? T : never }) {
+function RecoveryResultBanner({ data }: { data: ChaosRunDetail }) {
   const isPodKill = data.scenario === 'TaskManagerPodKill'
   if (!isPodKill || data.observationTimeoutSecs == null || data.observationTimeoutSecs === 0) return null
 
@@ -262,10 +263,12 @@ function ModalContent({
   name,
   checkpointHistory,
   throughputHistory,
+  closeButtonRef,
 }: {
   name: string
   checkpointHistory: CheckpointSample[]
   throughputHistory: ThroughputSample[]
+  closeButtonRef: React.RefObject<HTMLButtonElement | null>
 }) {
   const closeDetail = useAppStore((s) => s.closeDetail)
 
@@ -291,7 +294,7 @@ function ModalContent({
           <p className="text-slate-400 text-[10px] uppercase tracking-wider font-semibold mb-1">
             Experiment Results
           </p>
-          <p className="text-slate-100 text-sm font-semibold truncate" title={name}>
+          <p id="detail-modal-title" className="text-slate-100 text-sm font-semibold truncate" title={name}>
             {name}
           </p>
           {data && (
@@ -311,6 +314,7 @@ function ModalContent({
           )}
         </div>
         <button
+          ref={closeButtonRef}
           onClick={closeDetail}
           className="flex-shrink-0 p-1.5 rounded hover:bg-slate-800 text-slate-500 hover:text-slate-200 transition-colors"
           aria-label="Close"
@@ -422,6 +426,9 @@ function ModalContent({
 
 // ── Modal shell ───────────────────────────────────────────────────────────────
 
+const FOCUSABLE_SELECTORS =
+  'a[href], button:not([disabled]), input:not([disabled]), select:not([disabled]), textarea:not([disabled]), [tabindex]:not([tabindex="-1"])'
+
 interface ChaosRunDetailModalProps {
   checkpointHistory: CheckpointSample[]
   throughputHistory: ThroughputSample[]
@@ -431,12 +438,66 @@ export default function ChaosRunDetailModal({ checkpointHistory, throughputHisto
   const detailRunName = useAppStore((s) => s.detailRunName)
   const closeDetail   = useAppStore((s) => s.closeDetail)
 
+  // Capture the element that had focus before the modal opened so we can restore it on close.
+  const previousFocusRef = useRef<Element | null>(null)
+  // Ref forwarded into ModalContent so we can focus the close button on open.
+  const closeButtonRef = useRef<HTMLButtonElement | null>(null)
+  const panelRef = useRef<HTMLDivElement | null>(null)
+
+  // Capture active element when the modal opens.
+  useEffect(() => {
+    if (detailRunName) {
+      previousFocusRef.current = document.activeElement
+    } else {
+      // Modal just closed — restore focus.
+      if (previousFocusRef.current && previousFocusRef.current instanceof HTMLElement) {
+        previousFocusRef.current.focus()
+      }
+      previousFocusRef.current = null
+    }
+  }, [detailRunName])
+
+  // Move focus to the close button on first render of the panel.
+  useEffect(() => {
+    if (detailRunName && closeButtonRef.current) {
+      closeButtonRef.current.focus()
+    }
+  }, [detailRunName])
+
+  // Escape key closes the modal.
   useEffect(() => {
     if (!detailRunName) return
     function onKey(e: KeyboardEvent) { if (e.key === 'Escape') closeDetail() }
     document.addEventListener('keydown', onKey)
     return () => document.removeEventListener('keydown', onKey)
   }, [detailRunName, closeDetail])
+
+  // Tab / Shift-Tab focus trap within the modal panel.
+  useEffect(() => {
+    if (!detailRunName) return
+    function onKeyDown(e: KeyboardEvent) {
+      if (e.key !== 'Tab' || !panelRef.current) return
+      const focusable = Array.from(
+        panelRef.current.querySelectorAll<HTMLElement>(FOCUSABLE_SELECTORS),
+      ).filter((el) => el.offsetParent !== null) // exclude hidden elements
+      if (focusable.length === 0) return
+      const first = focusable[0]
+      const last  = focusable[focusable.length - 1]
+      if (e.shiftKey) {
+        if (document.activeElement === first) {
+          e.preventDefault()
+          last.focus()
+        }
+      } else {
+        if (document.activeElement === last) {
+          e.preventDefault()
+          first.focus()
+        }
+      }
+    }
+    document.addEventListener('keydown', onKeyDown)
+    return () => document.removeEventListener('keydown', onKeyDown)
+  }, [detailRunName])
 
   if (!detailRunName) return null
 
@@ -450,6 +511,10 @@ export default function ChaosRunDetailModal({ checkpointHistory, throughputHisto
 
       {/* Modal panel */}
       <div
+        ref={panelRef}
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby="detail-modal-title"
         className="relative bg-slate-900 border border-slate-700 rounded-xl shadow-2xl w-full max-w-2xl max-h-[85vh] overflow-y-auto"
         onClick={(e) => e.stopPropagation()}
       >
@@ -457,6 +522,7 @@ export default function ChaosRunDetailModal({ checkpointHistory, throughputHisto
           name={detailRunName}
           checkpointHistory={checkpointHistory}
           throughputHistory={throughputHistory}
+          closeButtonRef={closeButtonRef}
         />
       </div>
     </div>

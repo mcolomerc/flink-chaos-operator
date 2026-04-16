@@ -133,10 +133,19 @@ export interface FlinkJobMetrics {
 
 // ── fetch helpers ──────────────────────────────────────────────────────────
 
+export class ApiError extends Error {
+  readonly status: number
+  constructor(status: number, message: string) {
+    super(message)
+    this.name = 'ApiError'
+    this.status = status
+  }
+}
+
 async function apiFetch<T>(path: string): Promise<T> {
   const res = await fetch(path)
   if (!res.ok) {
-    throw new Error(`API error ${res.status} on ${path}: ${await res.text()}`)
+    throw new ApiError(res.status, `API error ${res.status} on ${path}: ${await res.text()}`)
   }
   return res.json() as Promise<T>
 }

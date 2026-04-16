@@ -226,11 +226,14 @@ export function useTopology() {
     setEdges(newEdges)
   }, [data, selectedRunName, setNodes, setEdges])
 
+  const checkpointEndpoint = data?.externalConnections?.find((c) => c.purpose === 'checkpoint')?.endpoint
+
   return {
     nodes,
     edges,
     onNodesChange,
     onEdgesChange,
+    checkpointEndpoint,
     activeChaosRuns: data?.activeChaosRuns ?? [],
     deploymentName: data?.deploymentName ?? '',
     targetType: data?.targetType ?? 'FlinkDeployment',

@@ -166,7 +166,7 @@ func resolveFlinkClient(ctx context.Context, cfg Config, deploymentName string) 
 	// "deploymentName" label; the "app" label is checked as a fallback for
 	// standard Flink Kubernetes Operator deployments.
 	if deploymentName != "" {
-		filtered := podList.Items[:0]
+		filtered := make([]corev1.Pod, 0, len(podList.Items))
 		for i := range podList.Items {
 			podDN := podList.Items[i].Labels["deploymentName"]
 			if podDN == "" {

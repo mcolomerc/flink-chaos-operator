@@ -23,6 +23,7 @@ import (
 	"fmt"
 	"log/slog"
 	"net/http"
+	"sync/atomic"
 	"time"
 
 	"sigs.k8s.io/controller-runtime/pkg/client"
@@ -33,7 +34,11 @@ import (
 const (
 	ssePollInterval      = 3 * time.Second
 	sseHeartbeatInterval = 15 * time.Second
+	sseMaxConnections    = 50
 )
+
+// sseActiveConnections tracks the number of currently open SSE connections.
+var sseActiveConnections atomic.Int32
 
 // sseEvent is the envelope written to the SSE stream.
 type sseEvent struct {
@@ -50,6 +55,13 @@ type sseEvent struct {
 // The stream terminates when the client disconnects.
 func sseHandler(cfg Config) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
+		if sseActiveConnections.Add(1) > sseMaxConnections {
+			sseActiveConnections.Add(-1)
+			writeError(w, http.StatusTooManyRequests, "too many SSE connections")
+			return
+		}
+		defer sseActiveConnections.Add(-1)
+
 		flusher, ok := w.(http.Flusher)
 		if !ok {
 			writeError(w, http.StatusInternalServerError, "streaming not supported")

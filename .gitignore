@@ -35,4 +35,5 @@ bin/
 cmd/ui-server/dist/*
 !cmd/ui-server/dist/.gitkeep
 
-ui-server
+# ui-server built binary (root level only, not the cmd/ui-server/ source dir)
+/ui-server

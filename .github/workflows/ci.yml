@@ -45,6 +45,29 @@ jobs:
       - name: Build CLI
         run: CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -o /dev/null ./cmd/kubectl-fchaos
 
+      - name: Build ui-server (Go)
+        run: CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -o /dev/null ./cmd/ui-server
+
+  build-ui:
+    name: Build UI
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+          cache: npm
+          cache-dependency-path: ui/package-lock.json
+
+      - name: Install dependencies
+        working-directory: ui
+        run: npm ci --prefer-offline
+
+      - name: Build React frontend
+        working-directory: ui
+        run: npm run build
+
   docker-lint:
     name: Lint Dockerfile
     runs-on: ubuntu-latest
@@ -55,3 +78,8 @@ jobs:
         with:
           dockerfile: Dockerfile
           ignore: DL3018   # alpine: no --no-cache needed in multi-stage
+
+      - uses: hadolint/hadolint-action@v3.1.0
+        with:
+          dockerfile: Dockerfile.ui-server
+          ignore: DL3018

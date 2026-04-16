@@ -1,0 +1,22 @@
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: flink-chaos-ui-server
+  namespace: vvp-jobs
+  labels:
+    app: flink-chaos-ui-server
+  annotations:
+    nginx.ingress.kubernetes.io/rewrite-target: /
+spec:
+  ingressClassName: nginx
+  rules:
+    - host: flink-chaos-ui-server.localhost
+      http:
+        paths:
+          - path: /
+            pathType: Prefix
+            backend:
+              service:
+                name: flink-chaos-ui-server
+                port:
+                  number: 80

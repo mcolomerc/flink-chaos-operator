@@ -199,7 +199,9 @@ type SelectionSpec struct {
 // ActionSpec defines the disruptive action applied to the selected pods.
 type ActionSpec struct {
 	// Type is the action to perform on the selected pods.
-	Type ActionType `json:"type"`
+	// Only required when ScenarioSpec.Type is TaskManagerPodKill.
+	// +optional
+	Type ActionType `json:"type,omitempty"`
 
 	// GracePeriodSeconds is the grace period passed to the pod deletion API.
 	// Set to 0 for immediate termination.
@@ -483,6 +485,11 @@ type ObservationStatus struct {
 	// RecoveryObservedAt is the timestamp when the workload was confirmed recovered.
 	// +optional
 	RecoveryObservedAt *metav1.Time `json:"recoveryObservedAt,omitempty"`
+
+	// RecoveryTimeSeconds is the elapsed seconds between injection completion and
+	// confirmed recovery. Set only when recovery was actually observed.
+	// +optional
+	RecoveryTimeSeconds *int64 `json:"recoveryTimeSeconds,omitempty"`
 }
 
 // EphemeralContainerRecord tracks a single ephemeral tc container injection.

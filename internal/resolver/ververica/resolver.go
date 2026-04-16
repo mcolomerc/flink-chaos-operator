@@ -142,19 +142,29 @@ func (r *Resolver) discoverPods(
 // the described Ververica deployment.
 //
 // Primary match (when deploymentID is non-empty): the pod must carry a
-// deployment-id label (under either the flink.apache.org or vvp.io prefix)
-// whose value equals deploymentID.
+// deployment-id label. Three conventions are checked in order:
+//   - plain camelCase "deploymentId" (VVP ≥ 2.x default)
+//   - "flink.apache.org/deployment-id"
+//   - "vvp.io/deployment-id"
 //
 // Fallback match (when deploymentID is empty): the pod must carry a
-// deployment-name label whose value equals deploymentName. If vvpNamespace is
-// non-empty the pod must additionally carry a matching namespace label.
+// deployment-name label. Three conventions are checked:
+//   - plain camelCase "deploymentName"
+//   - "flink.apache.org/deployment-name"
+//   - "vvp.io/deployment-name"
+//
+// If vvpNamespace is non-empty the pod must additionally carry a matching
+// namespace label ("vvpNamespace", "flink.apache.org/namespace", or
+// "vvp.io/namespace").
 func matchesTarget(labels map[string]string, deploymentID, deploymentName, vvpNamespace string) bool {
 	if deploymentID != "" {
-		return labels["flink.apache.org/deployment-id"] == deploymentID ||
+		return labels["deploymentId"] == deploymentID ||
+			labels["flink.apache.org/deployment-id"] == deploymentID ||
 			labels["vvp.io/deployment-id"] == deploymentID
 	}
 
-	nameMatch := labels["flink.apache.org/deployment-name"] == deploymentName ||
+	nameMatch := labels["deploymentName"] == deploymentName ||
+		labels["flink.apache.org/deployment-name"] == deploymentName ||
 		labels["vvp.io/deployment-name"] == deploymentName
 
 	if !nameMatch {
@@ -165,7 +175,8 @@ func matchesTarget(labels map[string]string, deploymentID, deploymentName, vvpNa
 		return true
 	}
 
-	return labels["flink.apache.org/namespace"] == vvpNamespace ||
+	return labels["vvpNamespace"] == vvpNamespace ||
+		labels["flink.apache.org/namespace"] == vvpNamespace ||
 		labels["vvp.io/namespace"] == vvpNamespace
 }
 

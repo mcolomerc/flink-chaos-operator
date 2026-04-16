@@ -1,0 +1,16 @@
+apiVersion: v1
+kind: Service
+metadata:
+  name: flink-chaos-ui-server
+  namespace: vvp-jobs
+  labels:
+    app: flink-chaos-ui-server
+spec:
+  type: ClusterIP
+  selector:
+    app: flink-chaos-ui-server
+  ports:
+    - name: http
+      port: 80
+      targetPort: 8090
+      protocol: TCP

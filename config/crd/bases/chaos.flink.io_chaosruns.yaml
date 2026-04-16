@@ -92,9 +92,8 @@ spec:
                       type:
                         enum:
                         - DeletePod
+                        - ""
                         type: string
-                    required:
-                    - type
                     type: object
                   selection:
                     properties:
@@ -111,9 +110,78 @@ spec:
                           type: string
                         type: array
                     type: object
+                  network:
+                    description: Network describes network disruption parameters.
+                      Required when type is NetworkPartition or NetworkChaos.
+                    properties:
+                      bandwidth:
+                        type: string
+                      direction:
+                        enum:
+                        - Ingress
+                        - Egress
+                        - Both
+                        type: string
+                      duration:
+                        type: string
+                      externalEndpoint:
+                        properties:
+                          cidr:
+                            type: string
+                          hostname:
+                            type: string
+                          port:
+                            format: int32
+                            type: integer
+                        type: object
+                      jitter:
+                        type: string
+                      latency:
+                        type: string
+                      loss:
+                        format: int32
+                        maximum: 100
+                        minimum: 0
+                        type: integer
+                      target:
+                        enum:
+                        - TMtoJM
+                        - TMtoTM
+                        - TMtoCheckpoint
+                        - TMtoExternal
+                        type: string
+                    required:
+                    - target
+                    type: object
+                  resourceExhaustion:
+                    description: ResourceExhaustion configures a CPU or memory stress
+                      injection. Required when type is ResourceExhaustion.
+                    properties:
+                      duration:
+                        type: string
+                      memoryPercent:
+                        format: int32
+                        maximum: 100
+                        minimum: 1
+                        type: integer
+                      mode:
+                        enum:
+                        - CPU
+                        - Memory
+                        type: string
+                      workers:
+                        format: int32
+                        minimum: 1
+                        type: integer
+                    required:
+                    - mode
+                    type: object
                   type:
                     enum:
                     - TaskManagerPodKill
+                    - NetworkPartition
+                    - NetworkChaos
+                    - ResourceExhaustion
                     type: string
                 required:
                 - type
@@ -218,6 +286,9 @@ spec:
                   recoveryObservedAt:
                     format: date-time
                     type: string
+                  recoveryTimeSeconds:
+                    format: int64
+                    type: integer
                   taskManagerCountAfter:
                     type: integer
                   taskManagerCountBefore:
@@ -226,9 +297,9 @@ spec:
               phase:
                 enum:
                 - Pending
-                - Validating
                 - Injecting
                 - Observing
+                - CleaningUp
                 - Completed
                 - Aborted
                 - Failed
@@ -239,6 +310,9 @@ spec:
                 items:
                   type: string
                 type: array
+              observingStartedAt:
+                format: date-time
+                type: string
               startedAt:
                 format: date-time
                 type: string

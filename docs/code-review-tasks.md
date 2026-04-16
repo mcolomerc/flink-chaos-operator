@@ -1,221 +1,94 @@
-# Code Review — Go Developer Task List
+# Code Review Tasks
 
-Generated from full codebase review. Ordered by priority. Each task is self-contained and actionable.
-
----
-
-## Critical
-
-### CR-01 — Fix NetworkPolicy semantics (inverted partition logic)
-
-**File**: `internal/scenario/networkpartition/` (policy builder)
-**Severity**: Critical — functional correctness bug; the NetworkPartition scenario blocks all traffic *except* to the target peer instead of *only* blocking traffic to the target peer.
-
-**Problem**: Kubernetes NetworkPolicy rules are *allow* rules. A policy with `PolicyTypes: [Egress]` and one egress rule matching JM pods means TMs can *only* egress to JMs — the inverse of the intended partition. NetworkPolicy has no native "deny specific peer" primitive.
-
-**Required fix**: Restructure the NetworkPolicy generation to achieve a true partition. The standard pattern is:
-1. Create a default-deny egress policy for TM pods (empty `egress: []` with `PolicyTypes: [Egress]`).
-2. Create explicit allow policies for all traffic that should still be permitted (inter-TM, DNS, etc.).
-
-Or consider switching to a two-policy approach:
-- Policy A: default deny all egress on TM pods.
-- Policy B: allow egress to everything *except* the blocked peer by using CIDR negation if supported by the CNI.
-
-At minimum, add an integration test that verifies traffic between TMs and JMs is actually blocked (not only allowed) when a TMtoJM partition is in effect. Document the CNI requirements (standard NetworkPolicy does not support deny-specific-peer; a CNI like Calico with `NetworkPolicy` v2 or `GlobalNetworkPolicy` is required for true deny rules).
+Generated from the Go and React code review of the `feature/ui` branch.
 
 ---
 
-### CR-02 — Eliminate shell injection risk in tc builder
+## Go Backend
 
-**File**: `internal/scenario/networkchaos/tc/builder.go`
-**Severity**: Critical — any user-controlled field interpolated into `/bin/sh -c` is a shell injection vector.
+### Critical
 
-**Problem**: `EntrypointScript()` interpolates `r.PeerCIDR` and `r.Bandwidth` into a shell script passed to `/bin/sh -c`. Even though both fields are validated, the validated value is stored in the spec but the original string from the API object is what flows through. Future callers (or a validation bypass) could pass metacharacters.
+- [x] **Add `http.MaxBytesReader` to `createChaosRunHandler`** — unbounded request body allows memory exhaustion attacks.  
+  `internal/apiserver/handlers_chaos_write.go:74`
 
-**Required fix**: Remove the shell script entirely. Pass `tc` as a direct `command` + `args` array in the ephemeral container spec, bypassing `/bin/sh` entirely. Each `tc` invocation should be a separate container command or use `&&`-chained args without shell interpolation. Example:
+- [x] **Replace time-based name with `GenerateName`** — two requests within the same millisecond produce the same `ChaosRun` name and the second create fails.  
+  `internal/apiserver/handlers_chaos_write.go:87`
 
-```go
-// Instead of: /bin/sh -c "tc qdisc add dev eth0 root netem delay 100ms"
-// Use:
-Command: []string{"tc"},
-Args:    []string{"qdisc", "add", "dev", "eth0", "root", "netem", "delay", "100ms"},
-```
+- [x] **Validate `ScenarioType` and `SelectionMode` before casting from user string** — unknown values are passed silently to the controller.  
+  `internal/apiserver/handlers_chaos_write.go:115`
 
-For multi-step tc setup (add + filter), use an init container or a purpose-built entrypoint binary that accepts structured arguments, not a shell script.
+### Major
 
----
+- [x] **Validate `r.PathValue("name")` against RFC 1123** before using in Kubernetes API calls.  
+  `internal/apiserver/handlers_chaos.go:108`, `handlers_chaos_write.go:165`
 
-### CR-03 — Guard nil dereference in `waitForStableCheckpoint`
+- [x] **Parallelize `fetchVertexRates` HTTP calls** — sequential calls per vertex mean worst-case latency of `N × 5s`.  
+  `internal/observer/flinkrest/client.go:551`
 
-**File**: `internal/controller/chaosrun_controller.go`
-**Severity**: Critical — nil pointer panic under realistic conditions.
+- [x] **Fix slice filter mutation** — `filtered := podList.Items[:0]` mutates the backing array of the Kubernetes API response; use `make()` instead.  
+  `internal/apiserver/handlers_flink.go:169`
 
-**Problem**: `run.Status.StartedAt.Time.Add(obs.CheckpointWaitTimeout.Duration)` dereferences both `run.Status.StartedAt` and `obs.CheckpointWaitTimeout` without nil checks. If a status patch fails after `StartedAt` was set or if defaults were not applied (e.g., the object was created with a partial spec), this panics.
+- [x] **Add CORS headers to `server.go`** — frontend running on a different origin (e.g. Vite dev server) cannot reach the API without them.  
+  `internal/apiserver/server.go`
 
-**Required fix**:
-```go
-if run.Status.StartedAt == nil {
-    return errCheckpointNotStable // not ready yet; retry
-}
-if obs.CheckpointWaitTimeout == nil {
-    return fmt.Errorf("checkpointWaitTimeout is nil; defaults may not have been applied")
-}
-```
+- [x] **Add concurrent connection limit to SSE handler** — each connection creates two tickers and polls Kubernetes every 3 s; no upper bound.  
+  `internal/apiserver/handlers_sse.go`
 
----
+### Minor
 
-### CR-04 — Handle `PhaseValidating` in the controller state machine
+- [x] **Replace `indexOf` with `strings.IndexByte`** — reimplements stdlib.  
+  `internal/observer/flinkrest/client.go:285`
 
-**File**: `internal/controller/chaosrun_controller.go`, `api/v1alpha1/chaosrun_types.go`
-**Severity**: Critical — a ChaosRun in `Validating` phase is stuck forever with no progress and no error.
+- [x] **Use `rfc3339()` helper consistently** — `startedAt` in `listActiveChaosRuns` uses an inline format string instead of the shared helper.  
+  `internal/apiserver/handlers_topology.go:422`
 
-**Problem**: `PhaseValidating` is declared in the enum and appears in kubebuilder validation, but the controller's phase switch has no case for it. A manual status patch or a future migration could leave a run stuck in this phase indefinitely.
-
-**Options** (choose one):
-1. Remove `PhaseValidating` from the enum if it is not a real phase in the current state machine.
-2. Add a case in the switch that transitions it back to `PhasePending` or directly handles it like `PhasePending`.
+- [ ] **Add tests for `internal/apiserver`** — entire package has zero test files. Priority areas: `createChaosRunHandler` validation, `resolveFlinkClient` service discovery, `buildNetworkChaosSpec` / `buildResourceExhaustionSpec`, `toChaosRunSummary` / `toChaosRunDetail`, `deduplicateConnections`, `storageType` URI detection.
 
 ---
 
-## Major
+## React Frontend
 
-### CR-05 — Preserve real errors in `flinkdeployment` resolver
+### Must Fix
 
-**File**: `internal/resolver/flinkdeployment/resolver.go`
-**Severity**: Major — transient API errors (network timeout, RBAC) are masked as "not found".
+- [x] **Move `setSelectedDeployment` auto-select into `useEffect`** — currently called unconditionally during render (side-effect in render body).  
+  `ui/src/App.tsx:49`
 
-**Required fix**:
-```go
-if err := r.Client.Get(ctx, key, &fd); err != nil {
-    if apierrors.IsNotFound(err) {
-        return nil, fmt.Errorf("FlinkDeployment %q not found in namespace %q", name, namespace)
-    }
-    return nil, fmt.Errorf("fetching FlinkDeployment %q: %w", name, namespace, err)
-}
-```
-Apply the same pattern to the Ververica resolver if it has the same issue.
+- [x] **Add focus trap and focus restoration to `ChaosRunDetailModal`** — keyboard users tab into background elements; focus is not returned to the trigger on close.  
+  `ui/src/components/chaos/ChaosRunDetailModal.tsx`
 
----
+- [x] **Add `role="dialog"` / `aria-modal="true"` / `aria-labelledby` to `ChaosRunDetailModal`** — screen readers do not announce the modal boundary.  
+  `ui/src/components/chaos/ChaosRunDetailModal.tsx:443`
 
-### CR-06 — Reuse HTTP client in Flink REST observer
+- [x] **Fix `FieldGroup` label association** — `<label>` has no `htmlFor` and does not wrap the input; clicking the label does nothing.  
+  `ui/src/components/chaos/ChaosRunWizard.tsx:229`
 
-**File**: `internal/observer/flinkrest/observer.go`, `internal/controller/chaosrun_controller.go`
-**Severity**: Major — a new `http.Client` (and TCP connection pool) is created on every 5-second observation poll and on every reconcile during checkpoint wait.
+### Should Fix
 
-**Required fix**: Cache the HTTP client per endpoint. The simplest approach is to create the client once in `main.go` and inject it into the observer/controller, or to add a `sync.Map`-based cache keyed by endpoint URL inside the observer.
+- [x] **Remove duplicate `useNodesState`/`useEdgesState` in `FlinkGraph`** — `useTopology` and `FlinkGraph` both maintain separate node/edge state, causing double renders on every topology poll.  
+  `ui/src/components/topology/FlinkGraph.tsx:53`
 
-For `waitForStableCheckpoint` in the controller: the factory function `flinkrestpkg.NewHTTPClient` is called directly. Make the factory injectable (it already is on the observer struct — use the same pattern in the controller).
+- [x] **Wrap `useTMMetrics` `Map` construction in `useMemo`** — a new `Map` is created on every render; called by every TM and JM node.  
+  `ui/src/hooks/useTMMetrics.ts:21`
 
----
+- [x] **Remove duplicate `topology` query in `App.tsx`** — same query key as `useTopology` but with a conflicting `refetchInterval` (30 s vs 5 s); effective interval is undefined.  
+  `ui/src/App.tsx:29`
 
-### CR-07 — Log resolver errors during observation phase
+- [x] **Scope SSE query invalidation to active `deploymentName`** — currently invalidates all `['topology']` and `['chaosRuns']` queries on every event regardless of deployment.  
+  `ui/src/hooks/useSSE.ts:21`
 
-**File**: `internal/controller/chaosrun_controller.go`, `reconcileObserving`
-**Severity**: Major — silent failure; target resolution errors during observation are completely invisible.
+- [x] **Replace fragile 503 string-match with a structured `ApiError` class** — `isUnavailable` breaks if the backend changes its error message format.  
+  `ui/src/hooks/useFlinkMetrics.ts:149`
 
-**Required fix**:
-```go
-target, resolveErr := r.resolveTarget(ctx, run)
-if resolveErr != nil {
-    log.Error(resolveErr, "target resolution failed during observation; recovery signals may be incomplete")
-}
-```
+### Nice to Fix
 
----
+- [x] **Escape user input in `buildYAML`** — values containing `:`, `#`, or newlines produce structurally invalid YAML in the preview.  
+  `ui/src/components/chaos/ChaosRunWizard.tsx:71`
 
-### CR-08 — Anchor observation timeout to injection time, not start time
+- [x] **Replace array index key with `v.name` in vertices list** — index-as-key causes React to reuse DOM nodes when the list length changes.  
+  `ui/src/components/metrics/JobMetricsPanel.tsx:269`
 
-**File**: `internal/controller/chaosrun_controller.go`
-**Severity**: Major — checkpoint wait time (up to 5 min) silently reduces the actual observation window.
+- [x] **Use exported `ChaosRunDetail` type instead of `ReturnType<typeof fetchChaosRun>` extraction** in `RecoveryResultBanner`.  
+  `ui/src/components/chaos/ChaosRunDetailModal.tsx:78`
 
-**Required fix**: Record an `ObservingStartedAt` timestamp in `ChaosRunStatus` when the run transitions from `Injecting` to `Observing`. Use this timestamp for the observation timeout calculation instead of `StartedAt`. Update `zz_generated.deepcopy.go` and the API reference doc accordingly.
-
----
-
-### CR-09 — Use label selectors in pod list calls
-
-**Files**: `internal/resolver/flinkdeployment/resolver.go`, `internal/resolver/ververica/resolver.go`
-**Severity**: Major — listing all pods in a namespace is a performance and scalability problem.
-
-**Required fix** (flinkdeployment example):
-```go
-r.Client.List(ctx, &podList,
-    client.InNamespace(namespace),
-    client.MatchingLabels{"app": deploymentName},
-)
-```
-For Ververica, add `client.MatchingLabels{ververica.DeploymentIDLabel: deploymentID}` when `deploymentId` is set.
-
----
-
-## Minor
-
-### CR-10 — Set verdict on aborted runs
-
-**File**: `internal/controller/` (wherever `AbortRun` / terminal phase transitions happen)
-**Severity**: Minor — aborted runs have no verdict, creating empty metric label values.
-
-**Required fix**: When transitioning to `PhaseAborted`, set `run.Status.Verdict = v1alpha1.VerdictInconclusive` (or add a dedicated `VerdictAborted` constant to the enum). Ensure this is reflected in the kubebuilder validation marker.
-
----
-
-### CR-11 — Extract shared pod utility functions
-
-**Files**: `internal/resolver/flinkdeployment/resolver.go`, `internal/resolver/ververica/resolver.go`, `internal/resolver/podselector/resolver.go`
-**Severity**: Minor — `isPodEligible` is identically copied across three packages.
-
-**Required fix**: Create `internal/podutil/podutil.go` with `IsPodEligible(pod corev1.Pod) bool` and `ComponentRole(pod corev1.Pod) string`. Update all three resolvers to import and use these shared functions.
-
----
-
-### CR-12 — Extract shared ephemeral container utilities
-
-**Files**: `internal/scenario/networkchaos/driver.go`, `internal/scenario/resourceexhaustion/driver.go`
-**Severity**: Minor — `ephemeralContainerName` and `findEphemeralContainerState` are duplicated.
-
-**Required fix**: Create `internal/ephemeral/ephemeral.go` (or add to `internal/podutil/`) with shared `EphemeralContainerName(prefix, podName string, ts time.Time) string` and `FindEphemeralContainerState(pod *corev1.Pod, containerName string) *corev1.ContainerState`.
-
----
-
-### CR-13 — Use `cmd.Context()` instead of `context.Background()` in CLI
-
-**File**: `cmd/kubectl-fchaos/main.go`
-**Severity**: Minor — Ctrl+C does not cancel in-flight Kubernetes API calls.
-
-**Required fix**: Replace all `context.Background()` in `RunE` handlers with `cmd.Context()`. Cobra v1.2+ wires `cmd.Context()` to OS signal handling automatically when `cobra.EnableCommandSorting` is set and `PersistentPreRunE` registers a signal context.
-
----
-
-### CR-14 — Make CLI flags local (not package-level vars)
-
-**File**: `cmd/kubectl-fchaos/main.go`
-**Severity**: Minor — package-level flag vars make parallel testing impossible and pollute the global namespace.
-
-**Required fix**: Move flag variables inside each subcommand constructor function. Bind them using `cmd.Flags().StringVarP(&localVar, ...)` on locally declared variables, following the `targetFlagSet` pattern already used in the file.
-
----
-
-### CR-15 — Make `waitForStableCheckpoint` HTTP client injectable
-
-**File**: `internal/controller/chaosrun_controller.go`
-**Severity**: Minor — directly calls `flinkrestpkg.NewHTTPClient`, making checkpoint wait untestable without real HTTP.
-
-**Required fix**: Add a `FlinkClientFactory func(string) flinkrestpkg.Client` field to `ChaosRunReconciler`. Use it in `waitForStableCheckpoint`. Wire `flinkrestpkg.NewHTTPClient` in `main.go`. In tests, inject a stub factory.
-
----
-
-### CR-16 — Populate `DryRunPreview` for all scenario types
-
-**File**: `internal/controller/chaosrun_controller.go`
-**Severity**: Minor — `status.dryRunPreview` is defined in the API but never written.
-
-**Required fix**: In the dry-run branch of `reconcileInjecting`, populate `run.Status.DryRunPreview` with a human-readable description of what would be injected. For TaskManagerPodKill: list selected pods. For NetworkPartition: describe the NetworkPolicy that would be created. For NetworkChaos: describe the tc rule. For ResourceExhaustion: describe the stress-ng invocation.
-
----
-
-### CR-17 — Change `SelectionSpec.Count` from `int` to `int32`
-
-**File**: `api/v1alpha1/chaosrun_types.go`
-**Severity**: Minor — `int` is platform-dependent; `int32` is conventional for CRD numeric fields.
-
-**Required fix**: Change the field type to `int32`. Update all code that reads or writes this field (validation, controller, CLI). Update `zz_generated.deepcopy.go` if needed (scalar fields do not need deep copy but the struct's DeepCopyInto may reference it).
+- [x] **Clear history refs on unmount in `useFlinkMetrics`** — stale history from a previous mount appends to the next mount's charts.  
+  `ui/src/hooks/useFlinkMetrics.ts:50`

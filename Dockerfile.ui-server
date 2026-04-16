@@ -1,0 +1,29 @@
+# Stage 1: build the React frontend
+FROM node:20-alpine AS ui-builder
+WORKDIR /app/ui
+COPY ui/package*.json ./
+RUN npm ci --prefer-offline
+COPY ui/ ./
+RUN npm run build
+
+# Stage 2: build the Go binary (with embedded frontend)
+FROM golang:1.25-alpine AS go-builder
+ARG TARGETOS=linux
+ARG TARGETARCH=amd64
+WORKDIR /workspace
+COPY go.mod go.sum ./
+RUN go mod download
+COPY api/       api/
+COPY cmd/       cmd/
+COPY internal/  internal/
+# Place the compiled frontend where //go:embed expects it
+COPY --from=ui-builder /app/ui/dist ./cmd/ui-server/dist/
+RUN CGO_ENABLED=0 GOOS=${TARGETOS} GOARCH=${TARGETARCH} \
+    go build -a -ldflags="-s -w" -o ui-server ./cmd/ui-server/
+
+# Stage 3: minimal runtime image
+FROM gcr.io/distroless/static:nonroot
+WORKDIR /
+COPY --from=go-builder /workspace/ui-server .
+USER 65532:65532
+ENTRYPOINT ["/ui-server"]

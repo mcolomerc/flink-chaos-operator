@@ -83,3 +83,36 @@ logging:
 leaderElect: false
 
 installCRD: true
+
+# ── Web UI ─────────────────────────────────────────────────────────────────
+ui:
+  # enabled: deploy the flink-chaos-ui-server alongside the operator.
+  enabled: false
+
+  image:
+    repository: mcolomervv/flink-chaos-ui-server
+    pullPolicy: IfNotPresent
+    tag: ""  # defaults to Chart.appVersion
+
+  # flinkEndpoint: override the Flink REST URL (e.g. "http://my-jm:8081").
+  # When empty the UI auto-discovers services labeled component=jobmanager.
+  flinkEndpoint: ""
+
+  service:
+    type: ClusterIP
+    port: 80
+
+  ingress:
+    enabled: false
+    className: nginx
+    host: flink-chaos-ui.localhost
+    annotations:
+      nginx.ingress.kubernetes.io/rewrite-target: /
+
+  resources:
+    requests:
+      cpu: 50m
+      memory: 64Mi
+    limits:
+      cpu: 200m
+      memory: 128Mi

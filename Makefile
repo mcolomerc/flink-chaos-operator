@@ -103,10 +103,46 @@ undeploy:
 	kubectl delete --ignore-not-found -f manifests/
 	kubectl delete --ignore-not-found -f config/crd/bases/
 
+# ---------------------------------------------------------------------------
+# UI server
+# ---------------------------------------------------------------------------
+
+UI_IMAGE ?= mcolomervv/flink-chaos-ui-server:latest
+
+## build-ui: compile the React frontend and copy assets into cmd/ui-server/dist/
+.PHONY: build-ui
+build-ui:
+	cd ui && npm ci --prefer-offline && npm run build
+	rm -rf cmd/ui-server/dist
+	cp -r ui/dist cmd/ui-server/dist
+
+## build-ui-server: build the ui-server binary (requires build-ui first)
+.PHONY: build-ui-server
+build-ui-server: build-ui
+	mkdir -p $(BIN_DIR)
+	CGO_ENABLED=0 GOOS=$(GOOS) GOARCH=$(GOARCH) \
+		go build -o $(BIN_DIR)/ui-server ./cmd/ui-server
+
+## docker-build-ui: build the ui-server Docker image (single command, no pre-steps needed)
+.PHONY: docker-build-ui
+docker-build-ui:
+	docker build -f Dockerfile.ui-server -t $(UI_IMAGE) .
+
+## deploy-ui: apply RBAC + Deployment + Service to the current cluster context
+.PHONY: deploy-ui
+deploy-ui:
+	kubectl apply -f config/ui/
+
+## undeploy-ui: remove the UI server from the cluster
+.PHONY: undeploy-ui
+undeploy-ui:
+	kubectl delete --ignore-not-found -f config/ui/
+
 ## clean: remove generated binaries
 .PHONY: clean
 clean:
 	rm -rf $(BIN_DIR)
+	rm -rf cmd/ui-server/dist
 
 # ---------------------------------------------------------------------------
 # Tool installation

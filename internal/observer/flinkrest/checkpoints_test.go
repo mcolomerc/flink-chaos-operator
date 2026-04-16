@@ -45,6 +45,14 @@ func (s *checkpointStub) Checkpoints(_ context.Context) (*flinkrest.CheckpointSu
 	return s.summary, s.err
 }
 
+func (s *checkpointStub) TaskManagerMetrics(_ context.Context) ([]flinkrest.TMMetrics, error) {
+	return nil, nil
+}
+
+func (s *checkpointStub) JobMetrics(_ context.Context) (*flinkrest.JobMetricsSummary, error) {
+	return nil, nil
+}
+
 func msAgo(d time.Duration) int64 {
 	return time.Now().Add(-d).UnixMilli()
 }
